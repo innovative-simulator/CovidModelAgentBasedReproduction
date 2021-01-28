@@ -12,6 +12,8 @@ All code on this git is (C) Christopher J. Watts (2021), and covered by GNU Publ
 
 ### The ABM
 
+* ____Rutland_Model____ contains the NetLogo model DiseaseDecisions.nlogo from which the simulation experiment was run. Also in this folder are all data files required as input to the model (in .csv format), and scripts for running the NetLogo experiment in headless mode (.sh for Linux systems, .bat for Windows). You may need to edit the pathnames in these for your own computer.
+
 ### Data analysis
 
 ## References
