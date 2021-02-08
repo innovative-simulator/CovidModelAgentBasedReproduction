@@ -1,7 +1,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Disease Decisions, version 3.0.
-;; (C) Christopher J Watts, 2020.
+;; Disease Decisions, version 3.1.
+;; This is a specially truncated version for reproducing
+;; the LSHTM compartmental model with POLYMOD contact matrices only.
+;; All other methods for simulating contacts (Activity-Locations
+;; using Time-Diaries survey) have been removed from menus for now.
+;; (C) Christopher J Watts, 2021.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -3903,8 +3907,8 @@ end
 GRAPHICS-WINDOW
 460
 10
-856
-407
+858
+409
 -1
 -1
 1.95
@@ -4207,7 +4211,7 @@ TEXTBOX
 45
 203
 64
-(C) Christopher J Watts, 2020.
+(C) Christopher J Watts, 2021.
 11
 0.0
 1
@@ -5246,8 +5250,8 @@ CHOOSER
 165
 Population-Generator
 Population-Generator
-"Nuclear-Household City" "Survey Data" "Demographic Data : UK" "Demographic Data"
-3
+"Demographic Data"
+0
 
 INPUTBOX
 10
@@ -5278,7 +5282,7 @@ CHOOSER
 115
 Disease-Model
 Disease-Model
-"LSHTM-Covid-19" "Susceptible-Infectious" "SIR"
+"LSHTM-Covid-19"
 0
 
 CHOOSER
@@ -5288,8 +5292,8 @@ CHOOSER
 215
 Social-Interactions
 Social-Interactions
-"Activity-Locations" "Contacts-Matrices"
-1
+"Contacts-Matrices"
+0
 
 INPUTBOX
 10
@@ -6542,36 +6546,45 @@ NIL
 @#$#@#$#@
 # DISEASE DECISIONS
 
-Version 3.0. This program in NetLogo (C) Christopher J Watts, 2020.
+Version 3.1. This program in NetLogo (C) Christopher J Watts, 2021.
 
 ## WHAT IS IT?
 
-This program simulates a disease epidemic in a population or city. The disease is intended to have some similarities with COVID-19. The city offers networks of opportunities for disease transmission in households, schools, and workplaces, and in social visits to friends. The effects on deaths and numbers of cases from closing the schools and/or workplaces can be explored. Also, sensitivity to the proporties of the disease can be studied, such as the time gap between a person becoming infectious and that person displaying symptoms and staying home away from work or school.
+This program simulates a disease epidemic in a population. The representation of the disease is based on the model of Covid-19 transmission published in Davies et al. (2020) and developed at the LSHTM. The LSHTM model is an SEIR-type compartmental model, stochastic, and individual-based. It uses contact matrices, giving the contact rate between each pair of 16 age groups, to determine the number of people per day in age group j encountered by a person in age group i. These matrices were derived from the POLYMOD study (Mossong et al. 2008). Also input to the model is demographic data, stating how many people there are in each age group (also broken down by sex, though this model does not use that information).
 
-Pressing buttons switches between "City View" and "Disease State Transition View".
+The current program is a reproduction of the LSHTM model, using NetLogo 6 and some techniques belonging to an agent-based simulation approach. The main points of comparison and difference are:
 
-### Note on version 3.0
-
-Version 3 introduces options to base populations and their interactions on input data. If, instead of generating an artificial city, the user generates a population from some demographics data, and then generates chance infections using a force of infection function based on contacts matrices, then the program will be implementing something close to the compartmental model published by the London School of Hygiene and Tropical Medicine (LSHTM).
-
-### Note on version 2.0
-
-In Version 1.0, the program simulated one day per tick, and scheduled events in which all people moved to/from work and school in sync. In version 2.0, each person has their own personal schedule, makes their own decisions over where they should be at each point in time, and adds their individual events to the events queue (b-events).
+* Both models sample from a probability distribution, for each person in each compartment, how long that person spends in that compartment before transitioning ("maturing") to another. (In this sense, the LSHTM model is "individual-based", unlike traditional differential equation models such as the SIR model of Kermack & McKendrick 1927).
+* Both models sample how many people are flowing out of the Susceptible compartment in the current time step. (This is Binomially distrbuted.) The ABM, however, then has to sample also which people (agents) they are (which requires generating a random permutation, thus a lot more random numbers, requiring more computer time). Similar sampling occurs where the compartmental model contains branch points (e.g. symptomatic / asymptomatic routes, hospitalize / not, death / recovered).
+* The ABM uses a discrete-event simulation engine. This should not have any consequences for model behaviour at present, but is used for future extensions.
+* The ABM can represent agents as having other attributes, and much more heterogeneity than is used by the present model processes. Again, this is for future extensions. The LSHTM model only uses Age-Group and Disease-State to determine what happens to people.
 
 ## HOW IT WORKS
 
-There are two major components, the model of disease progression, and the model of the city. Optionally, the role of the city model can be replaced with contacts matrices.
+There are two views: "City" and "Disease States". Clicking the "Change View" button under the NetLogo World will switch between the two.
+
+* In "City" view, every person and location is visible. For reproducing the LSHTM model, agents' coordinates and locations play no role in the model. (Contacts are based on the Contact Matrices, not on who you are with in your current location.) So we recommend running with the "view updates" tickbox unchecked to speed things up.
+* In "Disease States" view, the compartmental structure is shown instead using a NetLogo turtle breed (diseae-states) for compartments, and directed links (transitions) for flow paths.
+
+On running "Setup":
+
+* Disease-states and transitions are created, and associated with processes to determine a person's transition routes and times, given their age group.
+* Demographic data are loaded from the file "Demog.csv", households are created to locate people in, and people are created to match the demographics.
+* Contact matrices are loaded from the files "cm_home.csv", "cm_work.csv", "cm_school.csv" and "cm_other.csv". The overall contact rates between each pair of age groups is the sum of these four matrices.
+* Intervention start and end dates may be defined. During an intervention contact rates are a weighted sum of the four input matrices. (E.g. for "School Closures", the school matrix is multiplied by 0%.)
+* School holidays may be scheduled. Dates are included in the code for the UK. During school holidays, school contact rates are 0.
+* Seed infection events are scheduled. Starting on a given day d, there will be n people infected as seeds per day, for t days.
 
 ### Disease progression
 
-The disease progresses through several stages. These are represented by a breed of turtles, "disease-states". Directed links called "transitions" determine which state transitions can occur. The default disease model is based on one from the LSHTM.
+The disease progresses through several stages. The LSHTM model contained a transmission model (SEI3R structure), and added a health burden model and a deaths model to run in parallel to it. Parallel models are underdesirable in an ABM, so we have attempted to merge them into the main structure.
 
 * **Susceptible**: The normal state a person is in, susceptible to the disease being transmitted to them by anyone they encounter who has it.
 * **Exposed**: A person has been infected, but is not yet infectious, nor displaying symptoms.
 * **I-Preclinical**: A person can now infect others, and will become clinically ill, but does not yet display symptoms.
 * **I-Clinical**: A person is infectious and nows displays symptoms such as coughing, a temperature, and aches, and might now alter their behaviour in response (e.g. staying home).
-* **I-Subclinical**: A person is quite infectious (50% of I-Preclinical and I-Clinical), but asymptomatic.
-* **Hospitalize**: A person has now become incapacitated by the illness. They do not go to work or school, nor do they stay at home. They go instead to a hospital for treatment.
+* **I-Subclinical**: A person is less infectious (50% of I-Preclinical and I-Clinical), and asymptomatic.
+* **Hospitalize?**: A dummy state, in which it is decided whether or not a person is proceding directly to Recovered, or becoming so ill they need hospital treatment. 
 * **H-Non-ICU**: After hospitalization, a person occupies a bed on a General Ward.
 * **H-ICU**: After hospitalization, a person occupies a bed in an Intensive Care Unit.
 * **Recovered**: A person is no longer ill or infectious. For now, they are immune to further infection.
@@ -6583,105 +6596,44 @@ Recovery can occur from the I-Subclinical, and H- states.
 
 Death can occur only from the H- states.
 
-Recovered people can lose their immunity, and thus pass again to Susceptible. By default, we assume this takes a very long time (much longer than the epidemic). Most coronaviruses (the common cold, regular seasonal flu) mutate fast enough, or exist in multiple strains, for immunity to become irrelevant within months.
-
-### The city
-
-A city is created with a given number of people (**Population-Size**), organized into a number of households. Multiple options exist for generating this population, including basing it on survey data read from a file, and creating households with a fixed number of members. A number of workplaces and schools are created. Most adults go to work and are assigned one workplace. Children go to school and are assigned one school each.
-
-Optionally, all people have friendships, chosen with preference for those living nearer, of the same sex, and of similar ages, and if relevant, attending the same school/workplace.
+We assume Recovered people do not lose their immunity. A simple extension would allow them to pass again to Susceptible after a given time period. For some other infectious diseases (the common cold and regular seasonal flu are examples), immunity can become irrelevant within months.
 
 ### The simulation run
 
 The simulation starts at midnight with everyone in their homes (households). 
 
-One randomly chosen person is infectious at the start of the simulation. All others begin susceptible. The simulation runs until a halting condition is reached. Options include "6 Months", and "Infections Impossible", when people are all now either recovered, dead, or susceptible (but with no one left to infect them).
+On running the Go procedure, the clock ("sim-time") is advanced to the time of the first event in the events list ("b-events"). All events scheduled for that time are processed.
 
-### Disease state transitions (DST) 
+In a seed event, a randomly chosen Susceptible person is made Exposed (infected by someone outside the represented population).
 
-All transitions other than Susceptible-to-Exposed occur at random times, sampled distributed from exponential distributions with given means.
+Infection events are scheduled for every 6-hour time step. In an infection event, the rate of people becoming infected in each age group is calculated ("the force of infection"). This is based on the contact rate with and proportion of the population infectious in each age group, multiplied by the chance of a contact with an infectious person resulting in infection ("Susceptibility"). Susceptibility is derived from the Basic Reproduction Number, R0.
 
-Each state transition link keeps a count of the total number of transition events occurring of that type (ts-num-events), and a list of the numbers of events per day (ts-num-new-events). Each person keeps a record of their state transitions and when they occurred (p-ds-history).
+On entering a new disease-state, a person's transition route out of it and their transition time are sampled. Transition events may be processed at times other than the 6-hourly time steps of infection events.
 
-### Infections via Contacts-Matrices
+Each day at midnight, an update of output metrics is scheduled, so that, e.g., we know how many people died that day.
 
-Every 6 hours, susceptible people are checked to see if they have become infected. This involves calculating the force of infection for each age group, which is a function of susceptibility (calculated from R0), the contacts matrices, and the numbers of infectious people.
-
-### Infections via Activities-Locations
-
-At various points during the day each person consults their personal list of options (p-options) to decide where they should be at that point (home, school/work, hospital), and when they should next make another decision. 
-
-The rate of infection is determined within each location by the contact rates (p-contacts), susceptibles' degree of susceptibility (p-susceptibility), infected people's degree of infectiousness (p-infectiousness).
-
-Each time disease transmission occurs, the place where it occurred (workplace / school / household / friend) increases a count of infections. People also keep a count of they have infected.
+The simulation runs until a halting event. This could be, e.g., the clock reaching 2 years since the start.
 
 ## HOW TO USE IT
 
 Click "Setup". Click one of the "Go" buttons.
 
-### Key parameters
-
-* **Disease-Model**: Which disease states a person can pass through, including durations in each state, and probabilities. The default option is "**LSHTM-Covid-19**", based on the SEI3HR model used by LSHTM (see reference below).
-* **Population-Generator**: Generates a population organized into households. The default is to use "**Survey Data**" contained in the file model-pop2.csv.
-* **Social-Interactions**": Disease transmission occurs during social interactions. These may be simulated either using "**Contacts-Matrices**" (one for each of Home, Work, School, and Other), as the LSHTM compartmental model does, or using information about the population's regular activities taking place in a simulated city of locations (schools, workplaces, etc.) ("**Activity-Locations**").
-* **Seed-Infectors**: Determines how the epidemic is seeded. For a given number of days at the start, a given number of randomly chosen susceptible seed people become infected by sources outside the population. The LSHTM model uses 2 per day for 28 days. This may be unrealistically many for smaller simulated populations. Fractional numbers of people per day result in probabilistic infection. E.g. 1.5 results in at least one person per day, and a second person with chance 0.5.
-* **Intervention**: One purpose of the LSHTM model is too evaluate several options for reducing the epidemic by reducing social interactions. "**Baseline**" represents having no constraints on social interaction. "**Lockdown**" represents a combination of measures imposed to a high degree, _(Currently only works with Contacts-Matrices, not Activity-Locations.)_
-* **Intervention-Day**": Interventions are introduced on this day, with the simulation run beginning on day 0.
-* **R0**: A given estimate for the Basic Reproduction Rate, R0, is used to calculate susceptibility to the disease, and hence the chance of a contact resulting in transmission. _(Currently only works with Contacts-Matrices, not Activity-Locations.)_
-* **New-World-Width**": The simulated city is a square of patches, with this width. Patches are resized so that the world fits the space on the Interface.
-* **Perc-Patches-With-Household**: This % of patches have a household on them. Depending on "Population-Generator", these households may vary in their numbers of inhabitant people, so this provides only an approximate control over the population size. NB: If 100% of patches have households, there will be no vacant patches for other locations, including hospitals (program needs at least one to move the sick and dead to), and Activity-Locations.
-* **Halt-When**: When the simulation run comes to an end. E.g. when "6 Months" have been simulated.
-
-### The LSHTM Covid-19 disease model parameters
-
-The disease model uses many other parameters, controlling age-based probabilities of entering particular states, and probability distributions for durations spent in particular states. For simplicity, these have been hard-coded, since our aim is to dock with the LSHTM compartmental model, rather than attempt to fit an agent-based model to data. See the procedures **setup-disease-LSHTM-Covid-19** and **parameters-Prop-LSHTM** for more information.
-
-
-### A weekend effect?
-
-**Simulate-Weekends?**: The LSHTM model simplifies by omitting a weekend effect. It assumes contacts, including Work and School, are the same throughout the week. (Though it does allow for school holidays. See below.) This option allows for representing a weekend effect on Saturdays and Sundays by reducing Work contacts by a given %, and omitting school contacts. Unlike the "Contacts-Matrices", "Activity-Locations" allows for more sophisticated relations between day of the week and where social contacts occur.
-
-### School holidays
-
-Transmission in schools should not occur during school holidays, potentially resulting in a significant reduction to the disease spread. To simulate this, we follow the LSHTM model in hard-coding UK school holidays for the relevant period. See the procedure **setup-school-holidays**.
-
-
 ## THINGS TO NOTICE
 
-Under some parameter settings, it is quite possible for the infectious person to fail to pass the disease on before they become recovered or die. For example, if they are a child and their school is closed, or they do not have an assigned school, it is not improbable that none of their remaining opportunities
+Providing there are sufficient numbers of seed infections, there should appear an epidemic. The number of new cases, and the numbers of people in each disease-state after Susceptible rise and fall. The total numbers of people Recovered or Dead rise in S-shaped curves.
 
 ## THINGS TO TRY
 
-Try closing the schools (turn off "Go-To-School"), and/or closing workplaces ("Go-To-Work"). How does this affect the disease spread?
-
-Output may be sensitive to some parameters more than others. Look for phase transitions: typified by S-curves between some response output on the y-axis, and some increasing factor on the x-axis. Forecasting particular qualitative states ("No big problem from epidemic" versus "Most people got infected / hospitalized / died") may be relatively easy except around the centre of the transition point of the "S", when it becomes impossible.
-
-Look at:
-
-* Size of peak infectiousness.
-* Time peak infectiousness occurs.
-* Total number infected.
-* Total number dead at end.
-* Total number susceptible at end.
-
-Transitions are possible from Recovered to Susceptible, representing the loss of immunity to this virus after some time has passed. If the expected time parameter is reduced to something relatively (e.g. 3 months), what happens during the simulation run? Does the epidemic ever come to an end?
+Try running with an Intervention. This alters the contact rates for a 12-week period. Also try different start dates and start shifts for Interventions. What happens to the curves?
 
 ## EXTENDING THE MODEL
 
 ### Extending the disease model
 
-* Transmission rates or chances could become a function of the attributes of the susceptible and the infectious. E.g. older men may have higher chance of becoming infected than younger women.
-* The percentage chance of recovering from the Hospitalize state could become a function of the attributes of the ill person (age, sex, some genetic predisposition shared by other members of their household).
-* Catching the disease could take two distinct forms: mild and serious. People with mild symptoms can perform many of their activities as usual, and might not know they even have COVID-19. They have little or no chance of needing hospitalization or facing death from it.
-* Resources at the hospital: Some people could be key workers at the hospital. If they are not available for work (either sick or child-minding), some patients in the Hospitalize state may face increased chance of death rather than recovery. Likewise, there may be a limit on key equipment (beds, ventilators). The challenge then is to keep down the number of people in the Hospitalize state ("flattening the curve").
-* Social influence: The chances of a person staying home when ill could be the result of social pressure or information passed by word-of-mouth. In this case, social networks and neighbours will become more important.
-* Human decision making and activities: People prevented from going to school or work may seek other opportunities to spend their time outside the home, e.g. going to the park, the cinema or a bar. Each of these provide more opportunities for disease transmission. So how human agents reach such decisions may be important. Policy makers may need to consider providing stimuli for bored human beings stuck at home. A lockdown policy may become increasingly had to maintain as time goes by, or increasingly easy as more people know of others who have died or suffered serious illness.
-* The Economy: There is no attempt to model the economic impact of people being unable to work or shop, nor the economic impact of people dying. (Big topics for some other model!)
+Suggestions include:
 
-### Extending the city model
-
-* Other social venues offering opportunities for disease transmission: shops, public transport (bus, train, tram - both inside the compartment and while waiting), venues for freetime activities (cinemas, theatres, concert halls, sports stadiums, parks, streets and squares, restaurants, bars, cafes, etc.)
-
+* Alternative disease models: Examine the procedure "setup-disease-LSHTM-Covid-19" to understand how to create compartments and transitions.
+* Replacing the contact matrices: These are crude simplifications. They state mean rates, with no variations (no one can be a superspreader). Their use assumes contacts can be with anyone in the age group, with no preference for family, co-workers, schoolmates, friends, or neighbours. They do not state how long contacts are; 10 hours with a spouse at home is 1 contact, as is 30 seconds talking to the bus driver. Could an ABM be designed and calibrated that improves on this depiction of social contact?
 
 ## NETLOGO FEATURES
 
@@ -6689,13 +6641,10 @@ Note how the three-phase approach to discrete-event simulation (Tocher 1963) is 
 
 ## RELATED MODELS
 
-The SIR model, and other disease compartmental models, are often studied using differential equations or system dynamics simulations (Sterman 2000). One criticism of these is that they assume universal mixing between people. Their interactions are not constrained by social networks or by particular activities occurring only in particular places with particular people. Another criticism of the SIR model is that no one changes their social behaviour on becoming infected. This program, with its more complicated disease model, and its representation of a city of social opportunities, has the potential to avoid these criticisms of the SIR model.
+The SIR model of Kermack & McKendrick (1927) was the original compartmental model. Many others have been proposed since (SEIR, SEIRD, SEIHRD, etc.)
+The S-I model, based on the logistic function, is sometimes used as a model of the diffusion of innovations.
 
 ## CREDITS AND REFERENCES
-
-### The city model
-
-The highly simplified representation of a city was loosely inspired by a model shown by Joshua Epstein in his keynote at the Social Simulation Conference 2019. That model was not intended to represent the disease transmission network for COVID-19, but rather for a flu-like disease that requires much more prolonged time together between susceptible and infected persons (e.g. an 8-hour work/school day).
 
 The LSHTM model
 
@@ -6708,8 +6657,12 @@ https://github.com/cmmid/covid-UK
 
 ### Other references
 
+Kermack William Ogilvy and McKendrick A. G. (1927) A contribution to the mathematical theory of epidemicsProc. R. Soc. Lond. A115700–721
+http://doi.org/10.1098/rspa.1927.0118
+
 Tocher, K.D. (1963) "The Art of Simulation", English Universities Press.
 Sterman, John (2000) "Business Dynamics: Systems Thinking and Modeling for a Complex World", McGraw-Hill Education.
+
 @#$#@#$#@
 default
 true
@@ -7286,7 +7239,7 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.1.1
+NetLogo 6.2.0
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
