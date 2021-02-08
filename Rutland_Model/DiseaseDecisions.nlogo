@@ -193,17 +193,7 @@ locations-own [
   l-type-name ; Recording this saves time when inspecting locations.
   l-source ; If location based on data file, give reference so it can be traced back. E.g. Row ID
   l-contents ; Array of disease-states' people at this location.
-;  l-health-boost ; Multiplier to increase rate of health recovery.
-  l-infection-boost ; Multiplier to increase rate of infections.
-  l-sc-rate ; Total weighted contacts rates for susceptibles here.
-  l-ic-rate ; Total weighted contacts rates for infectious here.
-  l-nc-rate ; Total contacts rates for all non-dead here.
-  l-infection-rate ; Total infection rates for all  non-dead here.
-  l-dst-rate ; Total disease-state transitions' rates for all non-dead here.
   l-num-infections-here ; Number of infections occurring here since start.
-
-  l-min-age ; Schools only.
-  l-max-age ; Schools only.
 
 ;  l-people-here ; If we weren't moving people to locations, we wouldn't have people-here .
 
@@ -276,19 +266,11 @@ to setup
 ;  setup-rng "Seed-Go". Would mean, given fixed seed-setup, different people could be initial infected person.
 
   setup-disease-people ; Initialise the population's disease-states.
-  if Calculate-Susceptibles-Net? [calc-susceptibles-network] ; Calculates uninteresting(?) statistic. Delete?
 
   setup-school-holidays ; Defines school holidays, and schedules next closure/reopening.
 
   set num-days-in-lockdown 0
   set locked-down? false
-
-  if social-interactions = "Activity-Locations" [
-    setup-personal-schedules ; Give each person their personal list of options for choosing activities.
-    schedule-initial-decisions
-    setup-locations-rates
-    ; TO DO: Schedule interventions
-  ]
 
   if social-interactions = "Contacts-Matrices" [
     setup-contacts-matrices
@@ -477,7 +459,7 @@ to print-trace-turtles [given-text]
           show (word "Ticks=" ticks " : Time=" sim-time " : Day=" (sim-days) " " sim-time-as-hh-mm " at "([item l-type location-type-names] of p-location) " " p-location " : Feeling=" ([ds-name] of p-state) " : " given-text)
         ]
         if is-location? self [
-          show (word "(" (item l-type location-type-names) ") Ticks=" ticks " : Time=" sim-time " : Day=" (sim-days) " " sim-time-as-hh-mm " : Count=" (count people-here) " : sc=" l-sc-rate ", ic=" l-ic-rate ", nc=" l-nc-rate ", IR=" l-infection-rate ", DSTR=" l-dst-rate " : " given-text)
+          show (word "(" (item l-type location-type-names) ") Ticks=" ticks " : Time=" sim-time " : Day=" (sim-days) " " sim-time-as-hh-mm " : Count=" (count people-here) " : " given-text)
         ]
       ]
     ]
@@ -1117,21 +1099,6 @@ end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-to-report superspreader?
-  report superspreader-threshold >= p-num-infected
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to add-to-superspreaders?
-  ; 7 was chosen because it picked out the outliers
-  ; when testing a city of 250 people.
-  ; May need to scale it.
-  if superspreader-threshold = p-num-infected [set superspreaders (turtle-set superspreaders self)]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 to-report infectors
   report people with [infector?]
 end
@@ -1247,120 +1214,8 @@ end
 
 to setup-population
   set age-groups array:from-list n-values 16 [-> array:from-list n-values (count disease-states) [-> (list )]]
-  if Population-Generator = "Nuclear-Household City" [setup-households-of-fixed-size stop]
-  if Population-Generator = "Survey Data" [setup-households-from-survey-data-file stop]
   if Population-Generator = "Demographic Data : UK" [setup-households-with-demog-data demographic-data-UK stop]
   if Population-Generator = "Demographic Data" [setup-households-with-demog-data demographic-data stop]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to setup-households-of-fixed-size
-  let cur-household nobody
-  let cur-hh-id 0
-  set cur-person nobody
-  set households (turtle-set )
-;  foreach sort n-of round (Perc-Patches-With-Household * count patches / 100) patches [cur-patch ->
-  let cur-patch nobody
-  while [population-size > count people] [
-    set cur-patch vacant-patch
-    set cur-household new-household
-    set cur-hh-id cur-hh-id + 1
-    ask cur-household [
-      set l-source cur-hh-id
-      move-to cur-patch
-    ]
-    foreach sublist (reduce sentence n-values (ceiling (People-To-1-Household / 4)) [? -> shuffle (list
-      (list (40 + round random-normal 0 2) 1)
-      (list (35 + round random-normal 0 2) 0)
-      (list (11 + random 7) (random 2))
-      (list (10 - random 6) (random 2))
-    )]) 0 People-To-1-Household [? ->
-      set cur-person new-person (item 0 ?) (item 1 ?)
-      ask cur-person [create-habitant-to cur-household [set hidden? true]]
-    ]
-    ask cur-household [setup-cur-household]
-  ]
-
-  ; Safer, but slower, to do this in new-household.
-  ;set households locations with [l-type-name = "household"]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to setup-households-from-survey-data-file
-  ; Loads the household survey data file model-pop2.csv
-  ; Creates desired number of households, sampling from the data in the file.
-  ; Creates people for the households, using the data in the file.
-  let cur-household nobody
-  set cur-person nobody
-
-  set households (turtle-set )
-
-  ; Load household survey data.
-  if not file-exists? "model-pop2.csv" [user-message "FATAL! Tried to create people from file model-pop2.csv, but cannot find it in current folder." stop]
-  let cur-data but-first (csv:from-file "model-pop2.csv" ",")
-  let num-hhs length remove-duplicates map [r -> item 5 r] cur-data
-;  print (word "Number of distinct Household IDs in file = " num-hhs)
-  ; Assuming model-pop2.csv is sorted by household id.
-  ; if not: set cur-data sort-by [[x y] item 5 x < item 5 y ] cur-data
-
-  ; Build list of row numbers for finding each household's people in cur-data.
-  let hh-first-rows (list 0)
-  let cur-item 0
-  let cur-hh-id item 5 first cur-data
-  foreach cur-data [r ->
-    if cur-hh-id != item 5 r [
-      set hh-first-rows fput cur-item hh-first-rows
-      set cur-hh-id item 5 r
-    ]
-    set cur-item cur-item + 1
-  ]
-  set hh-first-rows reverse hh-first-rows
-  ;print hh-first-rows ; Debugging.
-  set cur-data array:from-list cur-data
-
-  ; Create desired number of households, sampling from cur-data, create their people.
-  let cur-hh-item 0
-  let cur-ditem 0
-  let cur-drow []
-;  foreach sort n-of round (Perc-Patches-With-Household * count patches / 100) patches [cur-patch ->
-  let cur-patch nobody
-  while [population-size > count people] [
-    set cur-patch vacant-patch
-    set cur-household new-household
-    ask cur-household [
-      move-to cur-patch
-    ]
-
-    ; Sample household from cur-data
-    if cur-hh-item = 0 [set hh-first-rows shuffle hh-first-rows] ; (Re)shuffle the pointers to households in cur-data
-    set cur-ditem item cur-hh-item hh-first-rows
-    set cur-drow array:item cur-data cur-ditem
-    set cur-hh-id item 5 cur-drow
-    ask cur-household [set l-source cur-hh-id]
-    while [cur-hh-id = item 5 cur-drow] [ ; Do all people with that household ID
-      ;print (word "cur-hh-item = " cur-hh-item " : cur-ditem = " cur-ditem " : cur-hh-id = " cur-hh-id) ; For debugging.
-      ; new-person like cur-drow
-      set cur-person new-person (item 1 cur-drow) (ifelse-value ("Female" = item 2 cur-drow) [1] [0])
-      ask cur-person [
-        set p-location cur-household
-        create-habitant-to cur-household [set hidden? true]
-        set p-data map [x -> x] cur-drow ; Store personal data somewhere. We'll process the rest of it later.
-;        show (word "cur-ditem = " cur-ditem " : cur-hh-id = " cur-hh-id " : cur-hh-item = " cur-hh-item)
-      ]
-      set cur-ditem cur-ditem + 1 ; Look for next person in cur-data
-      ifelse cur-ditem < array:length cur-data [ ; Not at end of cur-data yet?
-        set cur-drow array:item cur-data cur-ditem
-      ]
-      [
-        set cur-hh-id ""
-      ]
-    ]
-    ask cur-household [setup-cur-household]
-    set cur-hh-item (cur-hh-item + 1) mod length hh-first-rows
-  ]
-
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1518,121 +1373,9 @@ end
 ;; Setup city, its locations, and people.
 
 to setup-city
-  if social-interactions = "Activity-Locations" [setup-city-activity-locations]
   if social-interactions = "Contacts-Matrices" [setup-city-contact-matrices]
 
   set loc-type-num-infections-here array:from-list n-values (length location-types) [-> 0]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; City of Activity-Locations to determine contacts, instead of input matrices.
-
-to setup-city-activity-locations
-  setup-hospitals
-  setup-schools
-  setup-workplaces
-  setup-friendships
-  if any? patches with [1 < count locations-here] [
-    user-message-error "FATAL! Some patches have multiple locations on them."
-  ]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to setup-friendships
-  ask people [
-    let ego self
-    ask other people [
-      if who < [who] of myself [
-        if (random-float 1.0) < exp (0 - (
-          (friendship-distance * distance myself) +
-          (friendship-not-same-sex * ifelse-value (p-sex = [p-sex] of myself) [0] [1]) +
-          (Friendship-Age-Gap * abs (p-age - [p-age] of myself)) +
-          (friendship-not-same-school * ifelse-value (any? out-studying-neighbors) [ifelse-value (same-school-as? ego) [0] [1]] [0]) +
-          (friendship-not-same-workplace * ifelse-value (any? out-staffing-neighbors) [ifelse-value (same-workplace-as? ego) [0] [1]] [0]) +
-          friendship-base-param
-          ))
-        [
-          create-friendship-with myself [
-            set hidden? true
-            set color magenta
-          ]
-        ]
-      ]
-
-    ]
-  ]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report same-school-as? [given-alter]
-  ; run by person. Reports if self has a school in common with given-alter.
-  if not any? out-studying-neighbors [report false]
-  report any? out-studying-neighbors with [member? self [out-studying-neighbors] of given-alter]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report same-workplace-as? [given-alter]
-  ; run by person. Reports if self has a workplace in common with given-alter.
-  if not any? out-staffing-neighbors [report false]
-  report any? out-staffing-neighbors with [member? self [out-staffing-neighbors] of given-alter]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to setup-workplaces
-  set workplaces (turtle-set )
-  repeat min (list (max (list 1 round ((count people) / People-To-1-Workplace))) (count patches with [not any? locations-here])) [
-;  repeat max (list 1 round ((count people) / People-To-1-Workplace)) [
-    ask new-workplace "workplace" "factory" blue [move-to vacant-patch]
-  ]
-
-  ask people with [p-age >= 18 and p-age < 67] [
-    if 90 > random-float 100 [ ; Some people might be unemployed.
-      create-staffing-to one-of workplaces [
-        set hidden? true
-        set color blue + 1
-      ]
-    ]
-  ]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to setup-schools
-  ; Primary schools
-  set schools (turtle-set )
-  repeat max (list 1 round ((count people) / People-To-1-Primary-School)) [
-    ask new-school "house ranch" [
-      move-to vacant-patch
-      set l-min-age 5
-      set l-max-age 10
-    ]
-  ]
-  ; Secondary School
-  repeat max (list 1 round ((count people) / People-To-1-Secondary-School)) [
-    ask new-school "house ranch" [
-      move-to vacant-patch
-      set l-min-age 11
-      set l-max-age 18
-    ]
-  ]
-
-  ask people with [p-age >= 5 and p-age <= 18] [
-    if 95 > random-float 100 [ ; Some children might not be at school here.
-      create-studying-to one-of schools with [l-min-age <= [p-age] of myself and l-max-age >= [p-age] of myself] [
-        set hidden? true
-        set color yellow + 1
-      ]
-    ]
-  ]
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1676,11 +1419,6 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 to initialize-new-location
-  set l-sc-rate 0
-  set l-ic-rate 0
-  set l-nc-rate 0
-  set l-infection-rate 0
-  set l-dst-rate 0
   set l-num-infections-here 0
   set l-contents array:from-list n-values (count disease-states) [(list )]
   set label-color black
@@ -1700,13 +1438,6 @@ to-report new-household
     set shape "house"
     set size 1 * base-size
     initialize-new-location
-;    set l-health-boost round (1.0 * 10) ; To be used to alter ds transition rates. NB: Multiplied by 10 and converted to integer.
-    ifelse No-Isolation-In-Household? [
-      set l-infection-boost round (1.0 * 10) ; To be used to alter infection rates. NB: Multiplied by 10 and converted to integer.
-    ]
-    [
-      set l-infection-boost round (0.0 * 10) ; To be used to alter infection rates. NB: Multiplied by 10 and converted to integer.
-    ]
     set retobj self
   ]
   report retobj
@@ -1726,34 +1457,11 @@ to-report new-person [age sex]
     set p-age age
 ;    array:set age-groups p-age-group (fput self array:item age-groups p-age-group)
     set p-sex sex ; let 1=female, 0=male.
-    set p-susceptibility round (100 * sqrt (base-transmission-chance / 100)) ; NB: Converted back to integer.
-    set p-infectiousness round (100 * sqrt (base-transmission-chance / 100)) ; NB: Converted back to integer.
-    set p-contacts round (Contacts-Per-Hour * 24) ; Converted to per-day in order to match other rates.
     set color ifelse-value (p-sex = 1) [sky] [pink]
     set size ifelse-value (p-age < 20) [0.25 * base-size] [0.5 * base-size]
     set shape "person"
     set p-off-school? false
     set p-off-work? false
-    set retobj self
-  ]
-  report retobj
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report new-workplace [given-type given-shape given-color]
-  let retobj nobody
-  create-locations 1 [
-    set hidden? not (current-view = "City")
-    set l-type position "workplace" location-type-names
-    set l-type-name item l-type location-type-names
-    set workplaces (turtle-set workplaces self)
-    set color given-color
-    set size 1 * base-size
-    set shape given-shape
-    initialize-new-location
-;    set l-health-boost round (1.0 * 10) ; To be used to alter ds transition rates. NB: Multiplied by 10 and converted to integer.
-    set l-infection-boost round (1.0 * 10) ; To be used to alter infection rates. NB: Multiplied by 10 and converted to integer.
     set retobj self
   ]
   report retobj
@@ -1772,33 +1480,10 @@ to-report new-hospital
     set size 1 * base-size
     set shape "hospital"
     initialize-new-location
-;    set l-health-boost round (1.0 * 10) ; To be used to alter ds transition rates. NB: Multiplied by 10 and converted to integer.
-    set l-infection-boost round (1.0 * 10) ; To be used to alter infection rates. NB: Multiplied by 10 and converted to integer.
     set retobj self
   ]
   report retobj
 end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report new-school [given-shape]
-  let retobj nobody
-  create-locations 1 [
-    set hidden? not (current-view = "City")
-    set l-type position "school" location-type-names
-    set l-type-name item l-type location-type-names
-    set schools (turtle-set schools self)
-    set color yellow
-    set size 1 * base-size
-    set shape given-shape
-    initialize-new-location
-;    set l-health-boost round (1.0 * 10) ; To be used to alter ds transition rates. NB: Multiplied by 10 and converted to integer.
-    set l-infection-boost round (1.0 * 10) ; To be used to alter infection rates. NB: Multiplied by 10 and converted to integer.
-    set retobj self
-  ]
-  report retobj
-end
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2985,153 +2670,6 @@ end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Decisions about locations
-
-to schedule-initial-decisions
-  ask people [
-    let chosen-option option-with-max-penalty
-    schedule 0 self ([-> do-decision-in p-location]) p-location "Initial Deciding."
-  ]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to setup-personal-schedules
-  ask people [
-    if any? my-out-staffings [
-      set p-options schedule-of-ordinary-adult (min-one-of out-habitant-neighbors [who]) (min-one-of out-staffing-neighbors [who]) (min-one-of hospitals [distance myself])
-    ]
-    if any? my-out-studyings [
-      set p-options schedule-of-ordinary-child (min-one-of out-habitant-neighbors [who]) (min-one-of out-studying-neighbors [who]) (min-one-of hospitals [distance myself])
-    ]
-    if p-options = 0 [
-      ifelse p-age < 16 [
-        set p-options schedule-of-ordinary-child (min-one-of out-habitant-neighbors [who]) (min-one-of out-habitant-neighbors [who]) (min-one-of hospitals [distance myself])
-      ]
-      [
-        set p-options schedule-of-ordinary-adult (min-one-of out-habitant-neighbors [who]) (min-one-of out-habitant-neighbors [who]) (min-one-of hospitals [distance myself])
-      ]
-    ]
-  ]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report schedule-of-ordinary-adult [given-household given-workplace given-hospital]
-  report (list
-    ; location condition start-time end-time penalty
-    ; Between start-time and end-time, if I am not at location, and condition is true, then I incur the penalty.
-    ; Choose location that minimizes penalty.
-    (list given-household [-> true] 0 (24 * 60) 1) ; If nowhere better to go, go home.
-    (list given-household [-> true] (23 * 60) ((24 + 7) * 60) 10) ; Sleep at home until next day.
-    (list given-workplace [-> Go-To-Work? and not weekend?] (8 * 60 + 30) (17 * 60 + 30) 100) ; At work.
-    (list given-household [-> ifelse-value symptoms? [Stay-At-Home-With-Symptoms? > random-float 100] [false]] 0 (24 * 60) 200) ; Stay at home, you're ill.
-    (list [-> friends-house] [-> Go-To-Friend? and weekend?] (19 * 60 + 30) (23 * 60 + 30) 100) ; Visiting friend.
-    (list given-hospital [-> hospitalize?] 0 (24 * 60) 1000) ; Go to hospital!
-    (list given-hospital [-> dead?] 0 (24 * 60) 10000) ; Go to hospital (morgue)!
-    )
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report schedule-of-ordinary-child [given-household given-school given-hospital]
-  report (list
-    ; location condition start-time end-time penalty
-    ; Between start-time and end-time, if I am not at location, and condition is true, then I incur the penalty.
-    ; Choose location that minimizes penalty.
-    (list given-household [-> true] 0 (24 * 60) 1) ; If nowhere better to go, go home.
-    (list given-household [-> true] (23 * 60) ((24 + 7) * 60) 10) ; Sleep at home until next day.
-    (list given-school [-> Go-To-School? and not weekend?] (8 * 60 + 30) (15 * 60 + 30) 100) ; At school.
-    (list given-household [-> ifelse-value symptoms? [Stay-At-Home-With-Symptoms? > random-float 100] [false]] 0 (24 * 60) 200) ; Stay at home, you're ill.
-    (list [-> friends-house] [-> Go-To-Friend? and weekend?] (10 * 60 + 00) (12 * 60 + 30) 100) ; Visiting friend.
-    (list [-> friends-house] [-> Go-To-Friend? and weekend?] (14 * 60 + 30) (17 * 60 + 30) 100) ; Visiting friend.
-    (list given-hospital [-> hospitalize?] 0 (24 * 60) 1000) ; Go to hospital!
-    (list given-hospital [-> dead?] 0 (24 * 60) 10000) ; Go to hospital (morgue)!
-    )
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report friends-house
-  ; Run by person.
-  ; NB: The friend might not be at home!
-  if symptoms? [report p-location] ; You feel ill. Stay home.
-  if hospitalize? or dead? [report p-location] ; Forget it!
-
-  if not any? friendship-neighbors with [not dead? and not hospitalize? and not symptoms?] [
-    report p-location ; All your friends are sick. Stay where you are. (Presumably at home.)
-  ]
-
-  let destinations [p-location] of friendship-neighbors with [not dead? and not hospitalize? and not symptoms?]
-  set destinations filter [loc -> [not any? people-here with [symptoms? or hospitalize?]] of loc] destinations
-  if empty? destinations [report p-location] ; Nowhere to go. Stay put.
-  report one-of destinations ; Found somewhere to go.
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to do-decision-in [given-location]
-  ; Run by person.
-  ; Option has form (list location condition start-time end-time penalty).
-  ; Between start-time and end-time, if I am not at location, and condition is true, then I incur the penalty.
-  ; Choose location that minimizes penalty.
-  if given-location != p-location [stop] ; Decision obsolete, because I'm not where I was expecting to be.
-  let chosen-option option-with-max-penalty
-  if chosen-option = [] [stop]
-  let next-loc item 0 chosen-option
-  if is-anonymous-reporter? next-loc [
-    set next-loc runresult next-loc
-  ]
-  relocate-to next-loc
-;  schedule sim-time self ([-> relocate-to next-loc]) next-loc "Relocating."
-  schedule min (list
-    (last-midnight + item 3 chosen-option)
-    next-option-start-time
-    )
-    self ([-> do-decision-in next-loc]) next-loc "Deciding."
-
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report next-option-start-time
-  ; Work out what the next option would be (if its condition holds),
-  ; and report its start time.
-  ; Option has form (list location condition start-time end-time penalty).
-  let earliest-options filter [cur-option -> sim-time-of-day < item 2 cur-option] p-options
-  if empty? earliest-options [
-    report last-midnight + (24 * 60) + min map [cur-option -> item 2 cur-option] p-options
-  ]
-  report last-midnight + min map [cur-option -> item 2 cur-option] earliest-options
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report option-with-max-penalty
-  ; The option that is valid and currently incurs the largest penalty
-  ; is the best option to carry out.
-  let options []
-  let cur-time-of-day sim-time-of-day
-  foreach p-options [cur-option ->
-;    if p-location != item 0 cur-option [
-      if runresult item 1 cur-option [
-        if cur-time-of-day >= item 2 cur-option [
-          if cur-time-of-day < item 3 cur-option [
-            set options fput cur-option options
-          ]
-        ]
-      ]
-;    ]
-  ]
-  if empty? options [
-    show (word "WARNING: I've got nothing to do at time " sim-time "!")
-    report []
-  ]
-  let max-penalty max map [x -> last x] options
-  report one-of filter [x -> max-penalty = last x] options
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 to goto-hospital
   let old-location p-location
@@ -3160,12 +2698,11 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 to relocate-to [given-location]
-  if given-location = p-location [schedule-next-random-event stop] ; No change.
+  if given-location = p-location [stop] ; No change.
 
   let old-location p-location
   move-to given-location
   set p-location given-location
-  recalc-rates-after-relocation-from old-location
   set p-time-of-last-change sim-time
 
   if trace-turtles? [
@@ -3175,7 +2712,6 @@ to relocate-to [given-location]
   ]
 
   ; Anything else needed here?
-  schedule-next-random-event
 end
 
 
@@ -3201,33 +2737,6 @@ to-report random-event-time-gamma [mu k]
   ; Where mean=mu, shape=k, in days.
   ; Returns in minutes.
   report round (1440 * random-gamma k (k / mu))
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to schedule-next-random-event
-  ; It is possible to do the whole thing with just two random numbers.
-  ; Maybe later...
-
-  if (total-infection-rate) = 0 [stop] ; Nothing happens.
-
-  ; Sample time of the next random event.
-  let sampled-time random-event-time
-  if sampled-time >= b-events-next-time [stop] ; World might change at the next event, whereupon we will need to resample.
-
-  ; Ok. This will be the next event. Now sample what type of event it will be, where it will be, who it will involve...
-  ; Infection
-  let chosen-loc-type last rnd:weighted-one-of-list (map [[r t] -> (list r t)] (array:to-list loc-type-infection-rate) location-types) [p -> first p]
-  let chosen-location rnd:weighted-one-of chosen-loc-type [l-infection-rate]
-  ; NB: Using people-here, so mustn't have multiple locations on same patch.
-  let chosen-susceptible [rnd:weighted-one-of-list (array:item l-contents 0) [p -> [p-susceptibility * p-contacts] of p]] of chosen-location
-;  let chosen-susceptible [rnd:weighted-one-of (people-here with [susceptible?]) [p-susceptibility * p-contacts]] of chosen-location
-  if chosen-susceptible = nobody [ask chosen-location [show-error (word "ERROR! Managed to sample nobody to become infected.") ]]
-  ; NB: Using people-here, so mustn't have multiple locations on same patch.
-  let chosen-infector [rnd:weighted-one-of-list (sentence (map [ds -> array:item l-contents [who] of ds] filter [ds -> [ds-rel-inf > 0] of ds] compartments-sorted)) [p -> [p-infectiousness * p-contacts] of p]] of chosen-location
-;  let chosen-infector [rnd:weighted-one-of (people-here with [infector?]) [p-infectiousness * p-contacts]] of chosen-location
-  schedule sampled-time chosen-susceptible [-> become-infected-by chosen-infector chosen-location] chosen-location "Infection."
-
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3273,140 +2782,6 @@ end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-to setup-locations-rates
-  ask locations [
-;  ask locations with [any? people with [p-location = myself]] [ ; Misses the point.
-    set l-sc-rate sum map [p -> [p-susceptibility * p-contacts] of p] array:item l-contents 0
-    set l-ic-rate sum map [p -> [p-infectiousness * p-contacts] of p] (sentence map [ds -> array:item l-contents [who] of ds] filter [ds -> [ds-rel-inf > 0] of ds] compartments-sorted)
-;    set l-ic-rate sum [p-infectiousness * p-contacts] of people-here with [infector?]
-    set l-nc-rate sum map [p -> [p-contacts] of p] (sentence map [ds -> array:item l-contents [who] of ds] filter [ds -> ds != dead] compartments-sorted)
-;    set l-nc-rate sum [p-contacts] of people-here with [not dead?]
-    calc-infection-rate-here
-  ]
-
-  set loc-type-infection-rate array:from-list n-values (length location-types) [-> 0]
-
-  (foreach location-types (n-values (length location-types) [? -> ?]) [[cur-type cur-pos] ->
-    array:set loc-type-infection-rate cur-pos sum [l-infection-rate] of cur-type
-  ])
-  set total-infection-rate sum array:to-list loc-type-infection-rate
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to check-locations-rates
-  print ""
-  print "Performing check on location rates."
-  print ""
-  foreach sort locations [? -> ask ? [
-    ; NB: Using people-here, so mustn't have multiple locations on same patch.
-    if l-sc-rate != sum [p-susceptibility * p-contacts] of people-here with [susceptible?] [show (word "WARNING: Failed SC-Rate: " l-sc-rate)]
-    if l-ic-rate != sum [p-infectiousness * p-contacts] of people-here with [infector?] [show (word "WARNING: Failed IC-Rate: " l-ic-rate)]
-    if l-nc-rate != sum [p-contacts] of people-here with [not dead?] [show (word "WARNING: Failed NC-Rate: " l-nc-rate)]
-    calc-infection-rate-here
-  ]]
-
-  (foreach location-types (n-values (length location-types) [? -> ?]) [[cur-type cur-pos] ->
-    if array:item loc-type-infection-rate cur-pos != sum [l-infection-rate] of cur-type [print (word "WARNING: Failed loc-type-infection-rate item " cur-pos ": " array:to-list loc-type-infection-rate)]
-  ])
-  if total-infection-rate != sum array:to-list loc-type-infection-rate  [print (word "WARNING: Failed total-infection-rate" total-infection-rate)]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to recalc-rates-after-transition-from [old-state]
-  ; Run by person, after they have updated p-state.
-  let cur-susc-rate p-susceptibility * p-contacts
-  let cur-inf-rate p-infectiousness * p-contacts
-
-  ask p-location [
-    ; Remove old weights
-    array:set loc-type-infection-rate l-type (array:item loc-type-infection-rate l-type) - l-infection-rate
-    set total-infection-rate total-infection-rate - l-infection-rate
-    ; Add new weights
-    ifelse old-state = susceptible [
-      set l-sc-rate l-sc-rate - cur-susc-rate
-    ]
-    [ ; Old-state not susceptible. One of the states with random transitions out.
-    ]
-    if [susceptible?] of myself [set l-sc-rate l-sc-rate + cur-susc-rate]
-    if [ds-allows-infection?] of old-state [set l-ic-rate l-ic-rate - cur-inf-rate]
-    if [infector?] of myself [set l-ic-rate l-ic-rate + cur-inf-rate]
-    if [dead?] of myself [set l-nc-rate l-nc-rate - [p-contacts] of myself]
-
-    calc-infection-rate-here
-
-    ; Update weights for location types.
-    array:set loc-type-infection-rate l-type (array:item loc-type-infection-rate l-type) + l-infection-rate
-    set total-infection-rate total-infection-rate + l-infection-rate
-  ]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to recalc-rates-after-relocation-from [old-location]
-  recalc-rates-at old-location -1
-  recalc-rates-at p-location 1
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to recalc-rates-at [given-location adjustment]
-  ; Run by person, after they have updated p-state.
-  ; Will either remove person's rates from those at given-location (adjustment = -1)
-  ; or add them to those at given-location (adjustment = 1).
-  let cur-susc-rate p-susceptibility * p-contacts
-  let cur-inf-rate p-infectiousness * p-contacts
-
-  ask given-location [
-    ; Remove old rates
-    array:set loc-type-infection-rate l-type (array:item loc-type-infection-rate l-type) - l-infection-rate
-    set total-infection-rate total-infection-rate - l-infection-rate
-
-;    ; Debugging purposes.
-;    if self = location 273 [
-;      show (word myself ": " ([ds-name] of [p-state] of myself) ", sc=" l-sc-rate ", ic=" l-ic-rate ", nc=" l-nc-rate ", IR=" l-infection-rate)
-;    ]
-
-    if [susceptible?] of myself [set l-sc-rate l-sc-rate + adjustment * cur-susc-rate]
-    if [infector?] of myself [set l-ic-rate l-ic-rate + adjustment * cur-inf-rate]
-    if [not dead?] of myself [set l-nc-rate l-nc-rate + adjustment * [p-contacts] of myself]
-    if [not susceptible? and not dead?] of myself [set l-dst-rate l-dst-rate + adjustment * rate-conversion * ([[ds-transition-rate] of p-state] of myself) ]
-
-    calc-infection-rate-here
-
-;    if self = location 273 [
-;      show (word myself ": " ([ds-name] of [p-state] of myself) ", sc=" l-sc-rate ", ic=" l-ic-rate ", nc=" l-nc-rate ", IR=" l-infection-rate )
-;    ]
-
-    ; Add recomputed rates
-    array:set loc-type-infection-rate l-type (array:item loc-type-infection-rate l-type) + l-infection-rate
-    set total-infection-rate total-infection-rate + l-infection-rate
-  ]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to calc-infection-rate-here
-  ; Recompute infection rate at this location.
-  ; SI model: dI/dt = contact-rate * susceptibility * infectiousness * S * I / N
-  ; Heterogeneous agents:
-  ; lambda =
-  ; location_boost
-  ; * sum_all_S(My-Susceptibility * My-Contact-Rate)
-  ; * sum_all_I(My-Infectiousness * My-Contact-Rate)
-  ; / sum_all_people-here(My-Contact-Rate)
-  ifelse l-nc-rate = 0 [
-    set l-infection-rate 0
-  ]
-  [
-;    set l-infection-rate l-infection-boost * l-sc-rate * l-ic-rate / l-nc-rate
-    set l-infection-rate round (l-infection-boost * l-sc-rate * l-ic-rate / l-nc-rate)
-  ]
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 to become-infected-by [given-infector given-location]
   ; Run as person. Should be susceptible.
   ; Update infection and ds transition rates for person, their location, and the location's type.
@@ -3419,7 +2794,6 @@ to become-infected-by [given-infector given-location]
     ask given-infector [
       set p-num-infected p-num-infected + 1
       if p-num-infected > max-infected-by-one [set max-infected-by-one p-num-infected]
-      add-to-superspreaders?
     ]
   ]
 
@@ -3487,10 +2861,6 @@ to do-ds-transition [given-transition]
   set p-time-of-last-change sim-time
   set p-ds-history fput (list sim-time p-state) p-ds-history ; Each person knows their ds history.
 
-  if social-interactions != "Contacts-Matrices" [
-    recalc-rates-after-transition-from [end1] of given-transition ; Location recomputes its rates.
-  ]
-
   recolor-by-state
   if trace-turtles? [
     if member? self trace-turtles [print-trace-turtles (word "Transitioned from " ([ds-name] of [end1] of given-transition))]
@@ -3503,7 +2873,7 @@ to do-ds-transition [given-transition]
     let sampled-time sim-time + [runresult ts-ie-time] of sampled-transition
     schedule sampled-time self [-> do-ds-transition sampled-transition] sampled-transition "DS Transition."
   ]
-  schedule-next-random-event ; If next event is a random one, schedule it.
+  ; If next event is a random one, schedule it.
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3578,7 +2948,6 @@ to calc-stats
 
   if locked-down? [set num-days-in-lockdown num-days-in-lockdown + 1] ; Careful! Must run consistently before lockdown switched on/off.
 
-  if Calculate-Susceptibles-Net? [calc-susceptibles-network] ; Output. Not clear if this gives useful information. Comment out to save computer time?
   set deaths fput ([ds-cur-num] of dead) deaths
 
   ask transition-between Susceptible Exposed [
@@ -3739,34 +3108,6 @@ to do-time-series-plots
   set-current-plot-pen "R = 1"
   plotxy sim-days 1
 
-  if Calculate-Susceptibles-Net? [
-    set-current-plot "Largest Component Size / Susceptibles"
-    if num-susceptible > 0 [
-      plotxy sim-days (largest-sus-net-component / num-susceptible)
-    ]
-
-    set-current-plot "Sus. Neighbours of Infectious"
-    ifelse 0 < num-infectious [
-      let list-of-num-susc-nghbrs [count susceptible-neighbours] of infectors
-      set-current-plot-pen "Max"
-      plotxy sim-days max list-of-num-susc-nghbrs
-      set-current-plot-pen "Mean"
-      plotxy sim-days mean list-of-num-susc-nghbrs
-      set-current-plot-pen "Min"
-      plotxy sim-days min list-of-num-susc-nghbrs
-    ]
-    [
-      set-current-plot-pen "Max"
-      plotxy sim-days 0
-      set-current-plot-pen "Mean"
-      plotxy sim-days 0
-      set-current-plot-pen "Min"
-      plotxy sim-days 0
-    ]
-
-    set-current-plot "Susceptibles Net Components"
-    plotxy sim-days (num-sus-net-components)
-  ]
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3821,84 +3162,6 @@ to-report estimated-R
   ; report DOTS= R0 * S = R
   ; So for R=1, need herd immunity S = 1/R0.
   ; Analogy: Inverse of force of infection.
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Compute the Susceptibles-Susceptibles social network
-;; Did epidemic end because we ran out of infectious people,
-;; or because the Susceptibles-Network fragmented?
-; Only for outputs.
-; Not very useful? Therefore delete?
-
-to calc-susceptibles-network
-  ; Q. Does the epidemic halt because the network breaks up?
-  let num-components 0
-  let cur-component-sze 0
-  let largest-component-size 0
-  let stack []
-  let cur-node nobody
-
-  ask people with [susceptible?] [set p-component 0]
-  foreach sort people with [susceptible?] [? ->
-
-    ask ? [
-      set stack fput self stack
-      if p-component = 0 [
-        if largest-component-size < cur-component-sze [
-          set largest-component-size cur-component-sze
-        ]
-        set cur-component-sze 0
-        set num-components num-components + 1
-      ]
-    ]
-    while [not empty? stack] [
-      set cur-node first stack
-      set stack but-first stack
-      ask cur-node [
-        if p-component = 0 [
-          set p-component num-components
-          set cur-component-sze cur-component-sze + 1
-          ask susceptible-neighbours with [p-component = 0] [
-            set stack fput self stack
-          ]
-        ]
-      ]
-    ]
-  ]
-  if largest-component-size < cur-component-sze [
-    set largest-component-size cur-component-sze
-  ]
-
-  set num-sus-net-components num-components
-  set largest-sus-net-component largest-component-size
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report susceptible-neighbours
-  ; Note the u in neighbours. To avoid confusing Netlogo with neighbors.
-  ; To edit: Should exclude people currently in hospital.
-  let return-set (turtle-set )
-  if No-Isolation-In-Household? [
-    ask out-habitant-neighbors [
-      set return-set (turtle-set return-set (in-habitant-neighbors with [susceptible?]))
-    ]
-  ]
-  if not p-off-school? [
-    ask out-studying-neighbors [
-      set return-set (turtle-set return-set (in-studying-neighbors with [susceptible? and not p-off-school?]))
-    ]
-  ]
-  if not p-off-work? [
-    ask out-staffing-neighbors [
-      set return-set (turtle-set return-set (in-staffing-neighbors with [susceptible? and not p-off-work?]))
-    ]
-  ]
-  if Go-To-Friend? [
-    set return-set (turtle-set return-set (friendship-neighbors with [susceptible?]))
-  ]
-  report return-set with [self != myself]
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3974,28 +3237,6 @@ Count People
 1
 11
 
-MONITOR
-10
-1320
-202
-1365
-Friendships Network Density (%)
-100 * 2 * (count friendships) / (count people * ((count people) - 1))
-2
-1
-11
-
-MONITOR
-225
-1320
-332
-1365
-Mean Friendships
-2 * (count friendships) / (count people)
-1
-1
-11
-
 BUTTON
 1230
 985
@@ -4012,21 +3253,6 @@ NIL
 NIL
 NIL
 0
-
-SLIDER
-360
-1005
-577
-1038
-Base-Transmission-Chance
-Base-Transmission-Chance
-0
-25
-10.0
-0.5
-1
-%
-HORIZONTAL
 
 BUTTON
 260
@@ -4097,50 +3323,6 @@ NIL
 NIL
 0
 
-SWITCH
-360
-735
-565
-768
-Go-To-Work?
-Go-To-Work?
-0
-1
--1000
-
-SWITCH
-360
-770
-565
-803
-Go-To-School?
-Go-To-School?
-0
-1
--1000
-
-SWITCH
-360
-805
-565
-838
-Go-To-Friend?
-Go-To-Friend?
-0
-1
--1000
-
-SWITCH
-360
-840
-565
-873
-No-Isolation-In-Household?
-No-Isolation-In-Household?
-0
-1
--1000
-
 BUTTON
 1230
 1020
@@ -4157,17 +3339,6 @@ NIL
 NIL
 NIL
 0
-
-SWITCH
-360
-940
-565
-973
-Parent-Looks-After-Child?
-Parent-Looks-After-Child?
-0
-1
--1000
 
 BUTTON
 1230
@@ -4232,21 +3403,6 @@ NIL
 NIL
 NIL
 0
-
-SLIDER
-360
-875
-597
-908
-Stay-At-Home-With-Symptoms?
-Stay-At-Home-With-Symptoms?
-0
-100
-75.0
-5
-1
-%
-HORIZONTAL
 
 MONITOR
 1230
@@ -4325,39 +3481,6 @@ People-To-1-Hospital
 0
 Number
 
-INPUTBOX
-10
-850
-162
-910
-People-To-1-Workplace
-20.0
-1
-0
-Number
-
-INPUTBOX
-10
-910
-162
-970
-People-To-1-Primary-School
-1250.0
-1
-0
-Number
-
-INPUTBOX
-10
-970
-162
-1030
-People-To-1-Secondary-School
-5000.0
-1
-0
-Number
-
 MONITOR
 185
 795
@@ -4365,39 +3488,6 @@ MONITOR
 840
 NIL
 Count Hospitals
-17
-1
-11
-
-MONITOR
-185
-855
-335
-900
-NIL
-Count Workplaces
-17
-1
-11
-
-MONITOR
-185
-915
-335
-960
-Count Primary Schools
-Count Schools with [l-max-age < 12]
-17
-1
-11
-
-MONITOR
-185
-975
-335
-1020
-Count Secondary Schools
-count schools with [l-max-age > 12]
 17
 1
 11
@@ -4424,108 +3514,12 @@ City Definition:
 1
 
 TEXTBOX
-360
-980
-510
-998
-Disease Transitions:
-16
-0.0
-1
-
-TEXTBOX
 365
 675
 515
 700
 People's Behaviour:
 16
-0.0
-1
-
-TEXTBOX
-10
-1050
-160
-1080
-Friendship Network:
-16
-0.0
-1
-
-INPUTBOX
-10
-1095
-162
-1155
-Friendship-Base-Param
-0.0
-1
-0
-Number
-
-INPUTBOX
-10
-1155
-162
-1215
-Friendship-Distance
-0.25
-1
-0
-Number
-
-INPUTBOX
-165
-1095
-335
-1155
-Friendship-Not-Same-Sex
-0.5
-1
-0
-Number
-
-INPUTBOX
-10
-1215
-162
-1275
-Friendship-Age-Gap
-0.25
-1
-0
-Number
-
-INPUTBOX
-165
-1215
-335
-1275
-Friendship-Not-Same-Workplace
-0.5
-1
-0
-Number
-
-INPUTBOX
-165
-1155
-335
-1215
-Friendship-Not-Same-School
-0.75
-1
-0
-Number
-
-TEXTBOX
-15
-1075
-300
-1101
-Prob(Friendship) = exp(-(Base + Sum(Param * Test)))
-11
 0.0
 1
 
@@ -4662,23 +3656,6 @@ NIL
 NIL
 NIL
 0
-
-BUTTON
-10
-1280
-72
-1313
-NIL
-Setup
-NIL
-1
-T
-OBSERVER
-NIL
-NIL
-NIL
-NIL
-1
 
 TEXTBOX
 1475
@@ -4916,127 +3893,6 @@ PENS
 "R" 1.0 0 -16777216 true "" ""
 "R = 1" 1.0 0 -7500403 true "" ""
 
-PLOT
-2235
-195
-2510
-345
-Largest Component Size / Susceptibles
-Sim-Time (Days)
-Standardized Metric
-0.0
-1.0
-0.0
-1.0
-true
-false
-"" ""
-PENS
-"Largest Size" 1.0 0 -14730904 true "" ""
-
-MONITOR
-2460
-140
-2622
-185
-Size of Largest Component
-largest-sus-net-component
-1
-1
-11
-
-MONITOR
-2460
-90
-2552
-135
-# Components
-num-sus-net-components
-1
-1
-11
-
-PLOT
-2235
-45
-2440
-195
-Susceptibles Net Components
-Sim-Time (Days)
-Metric
-0.0
-1.0
-0.0
-1.0
-true
-false
-"" ""
-PENS
-"default" 1.0 0 -2674135 true "" ""
-
-TEXTBOX
-2460
-50
-2665
-96
-Potential Transmission Network between Susceptibles:
-13
-0.0
-1
-
-PLOT
-2235
-350
-2495
-525
-Sus. Neighbours of Infectious
-Sim-Time (Days)
-Sus. Neighbors
-0.0
-1.0
-0.0
-1.0
-true
-true
-"" ""
-PENS
-"Max" 1.0 0 -14333415 true "" ""
-"Mean" 1.0 0 -10899396 true "" ""
-"Min" 1.0 0 -4399183 true "" ""
-
-MONITOR
-1905
-425
-2042
-470
- Count Superspreaders
-count superspreaders
-17
-1
-11
-
-MONITOR
-1905
-475
-2137
-520
-% of Infections due to Superspreaders
-100 * (sum [p-num-infected] of superspreaders) / total-infected
-1
-1
-11
-
-MONITOR
-1905
-525
-2062
-570
-Worst Spreader's Infected
-max-infected-by-one
-17
-1
-11
-
 BUTTON
 1230
 1090
@@ -5119,17 +3975,6 @@ Transition-Labels
 "Count" "%" "Time-Param" "Rate" "Probability" ""
 5
 
-INPUTBOX
-580
-1000
-732
-1060
-Contacts-Per-Hour
-2.0
-1
-0
-Number
-
 SWITCH
 785
 880
@@ -5164,9 +4009,9 @@ Debugging Aids:
 
 INPUTBOX
 10
-1415
+1005
 163
-1475
+1065
 Base-Size
 1.0
 1
@@ -5218,16 +4063,6 @@ TEXTBOX
 1165
 1160
 Enter code that reports a list, turtle-set, or individual turtle of breeds People and/or Locations.\nThe result will be stored in a sorted list trace-turtles.
-11
-0.0
-1
-
-TEXTBOX
-360
-915
-510
-933
-Not currently in use by code:
 11
 0.0
 1
@@ -5382,16 +4217,6 @@ Intervention-Day
 0
 Number
 
-TEXTBOX
-365
-710
-550
-736
-Use with Activity-Locations:
-12
-0.0
-1
-
 INPUTBOX
 10
 270
@@ -5414,9 +4239,9 @@ YYYY-M-D\n(Used to convert school holiday dates.)
 1
 
 SLIDER
-590
+360
 735
-762
+532
 768
 Weekend-Work
 Weekend-Work
@@ -5429,9 +4254,9 @@ Weekend-Work
 HORIZONTAL
 
 SWITCH
-590
+360
 770
-767
+537
 803
 Simulating-Weekends?
 Simulating-Weekends?
@@ -5451,18 +4276,18 @@ R0 is used with contacts matrices to calculate Susceptibility.
 
 TEXTBOX
 167
-1422
+1012
 317
-1463
+1053
 Used for controlling default sizes of people, households, etc.
 11
 0.0
 1
 
 TEXTBOX
-590
+360
 710
-785
+555
 736
 Use with Contacts-Matrices:
 12
@@ -5534,41 +4359,11 @@ Count Households
 11
 
 TEXTBOX
-1905
-385
-2190
-426
-\"Superspreaders\" have infected at least the threshold number of people.
-11
-0.0
-1
-
-TEXTBOX
-2235
-10
-2490
-40
-Susceptibles Network Analysis:
-16
-0.0
-1
-
-TEXTBOX
 1235
 665
 1475
 701
 User-Definable Histogram:
-16
-0.0
-1
-
-TEXTBOX
-1905
-355
-2110
-380
-Superspreaders Analysis:
 16
 0.0
 1
@@ -6107,10 +4902,10 @@ Health Burden:
 1
 
 INPUTBOX
-580
-1130
-732
-1190
+370
+975
+522
+1035
 Lockdown-ICU-Level
 1.0
 1
@@ -6118,20 +4913,20 @@ Lockdown-ICU-Level
 Number
 
 CHOOSER
-355
-1145
-497
-1190
+370
+925
+512
+970
 Lockdown-Trigger
 Lockdown-Trigger
 "No-Lockdown" "Intervention-Day" "ICU-Level"
 0
 
 TEXTBOX
-355
-1130
-570
-1156
+370
+910
+585
+936
 Lockdown-Trigger not yet implemented.
 11
 0.0
@@ -6264,10 +5059,10 @@ School-Holiday?
 11
 
 INPUTBOX
-355
-1370
-910
-1430
+5
+1130
+560
+1190
 Input-Data-Folder
 NIL
 1
@@ -6348,38 +5143,6 @@ Intervention-Shift
 1
 Days
 HORIZONTAL
-
-SWITCH
-2535
-205
-2742
-238
-Calculate-Susceptibles-Net?
-Calculate-Susceptibles-Net?
-1
-1
--1000
-
-INPUTBOX
-2045
-410
-2197
-470
-Superspreader-Threshold
-8.0
-1
-0
-Number
-
-TEXTBOX
-2070
-525
-2220
-581
-NB: If using contact matrices and force of infection, program does not count how many you infect.
-11
-0.0
-1
 
 MONITOR
 1915
@@ -6493,10 +5256,10 @@ NIL
 1
 
 BUTTON
-360
-1325
-447
-1358
+10
+1085
+97
+1118
 Set Folder
 setup-input-folder\n
 NIL
@@ -6510,10 +5273,10 @@ NIL
 1
 
 BUTTON
-450
-1325
-547
-1358
+100
+1085
+197
+1118
 Clear Folder
 set input-data-folder \"\"
 NIL
