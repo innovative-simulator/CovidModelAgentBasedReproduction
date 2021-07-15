@@ -5425,7 +5425,6 @@ http://doi.org/10.1098/rspa.1927.0118
 
 Tocher, K.D. (1963) "The Art of Simulation", English Universities Press.
 Sterman, John (2000) "Business Dynamics: Systems Thinking and Modeling for a Complex World", McGraw-Hill Education.
-
 @#$#@#$#@
 default
 true
