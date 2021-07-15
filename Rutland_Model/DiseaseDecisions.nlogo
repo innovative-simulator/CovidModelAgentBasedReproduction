@@ -261,7 +261,7 @@ to setup
   set sim-stopping? false
   set sim-stopping-reason ""
 
-  b-events-setup
+  set b-events events-make b-events-structure
 
 ;  setup-rng "Seed-Go". Would mean, given fixed seed-setup, different people could be initial infected person.
 
@@ -1997,8 +1997,7 @@ to go [step-time]
 
   while [sim-time < step-time and not sim-stopping?] [
     ; Step A: Advance clock.
-    set sim-time b-events-next-time
-    ;  b-events-shuffle-next-events ; Shuffle order of events at this time. NB: N simultaneous events will need N random numbers for the permutation.
+    set sim-time events-next-time b-events
 
     ; Step B: Do Time-Bound Events.
     ; People relocating.
@@ -2006,8 +2005,11 @@ to go [step-time]
     ; Events were scheduled using
     ; b-events-put event-time (list given-agent given-task given-object given-reason sim-time)
     let cur-event []
-    while [sim-time = b-events-next-time] [
-      set cur-event last b-events-get
+    while [sim-time = events-next-time b-events] [
+      set cur-event last events-one-of-next b-events ; if we want to shuffle events scheduled for same time point.
+;      set cur-event last events-next b-events ; If we want to process events in order of being added to schedule (whether FIFO or LIFO).
+      set b-events events-remove sim-time cur-event b-events
+
       if Print-Processing-B-Events? [
         print (word ticks ": " sim-time ": Event=" cur-event ", IR=" total-infection-rate ".")
       ]
@@ -2039,7 +2041,7 @@ to go [step-time]
 
     ; Step C: Do Conditional Events.
     if halt-when = "Infections Impossible" [if (0 = [ds-cur-num] of susceptible) [set sim-stopping-reason (word "Infections Impossible") set sim-stopping? true]]
-  if halt-when = "All Post-Infectious" [if (count people) = [ds-cur-num] of recovered + [ds-cur-num] of dead [set sim-stopping-reason (word "All Post-Infectious") set sim-stopping? true]]
+    if halt-when = "All Post-Infectious" [if (count people) = [ds-cur-num] of recovered + [ds-cur-num] of dead [set sim-stopping-reason (word "All Post-Infectious") set sim-stopping? true]]
     if halt-when = "No Susceptible" [if (0 = [ds-cur-num] of susceptible) [set sim-stopping-reason (word "No Susceptible") set sim-stopping? true]]
     if halt-when = "6 Months" [if sim-time >= (1440 * 366 / 2) [set sim-stopping-reason (word "End of 6 months") set sim-stopping? true]]
     if halt-when = "9 Months" [if sim-time >= (1440 * 366 * 3 / 4) [set sim-stopping-reason (word "End of 9 months") set sim-stopping? true]]
@@ -2075,248 +2077,197 @@ end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Discrete-Event Simulation
-;; Code for processing list of time-Bound events (b-events).
-;; b-events represents a time-priority queue.
-;; Currently, b-events is structured as a tree:
-;; 1 branch for each day on which events will occur,
-;; 1 subbranch for each time at which events will occur,
-;; 1 leaf for each event, at which the details of that event are stored.
-
-; Methods: b-events-setup, b-events-shuffle-next-events, b-events-put
-; Reporters: b-events-get, b-events-on, b-events-at, b-events-next-time
-; Other b-events- procedures can be considered "internal". You shouldn't access them directly.
-
-to b-events-setup
-  set b-events []
-end
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report b-events-next-time
-  ; Reports time of first event.
-  if empty? b-events [report false]
-
-  report first first last first b-events
-end
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Time-bound Events-list code
 
-to-report b-events-next-but-one-time
-  ; Reports time of first event later than the time of first event.
-  if empty? b-events [report false]
-  ; if first day has 1 time, then need a second day.
-  if 1 = length last first b-events [
-    if 1 = length b-events [report false] ; There is only 1 day.
-    report first first last item 1 b-events
+to-report events-make-from-list [given-structure given-simple-list]
+  let ret events-make given-structure
+  foreach given-simple-list [a ->
+    set ret events-insert ret (first a) (last a)
   ]
-  ; else report second time on first day.
-  report first item 1 last first b-events
+  report ret
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-to b-events-shuffle-next-events
-  ; Shuffle the events scheduled to run at next time.
-  ; (Running simultaneous in the order they were scheduled in
-  ; might cause artifacts. If simultaneous events then scheduled simultaneous events for some future time,
-  ; the order would repeated.
-  ; If events schedule instantaneous events, these latter will wait until last and not be re-shuffled.
-  ; - But then what sense does it make to have instantaneous events?
-  ; Preserving the order may be useful when debugging. So maybe comment the next three lines out.
-  let cur-day first first b-events
-  let cur-time first first last first b-events
-  set b-events fput (list cur-day fput (list cur-time shuffle last first last first b-events) but-first last first b-events) but-first b-events
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report b-events-on [given-day]
-  ; Reports times list for given-day.
-  ; b-events is (list day (times list)), sorted ascending by day.
-  foreach b-events [day-times-pair ->
-    if given-day = first day-times-pair [ report last day-times-pair ] ; Found it, so report it.
-    if given-day < first day-times-pair [ report [] ] ; Missed it, so it can't be there.
-  ]
-  report [] ; All days earlier than given day.
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report b-events-at [given-time]
-  ; Reports events list for given-time.
-  ; b-events is (list day (list time (list event-details))), sorted ascending by day, ascending by time, reverse order inserted.
-  let cur-day int (given-time / (60  * 24))
-  foreach b-events-on cur-day [time-events-pair ->
-    if given-time = first time-events-pair [ report last time-events-pair ] ; Found it, so report it.
-    if given-time < first time-events-pair [ report [] ] ; Missed it, so it can't be there.
-  ]
-  report [] ; Either nothing on day, or failed to find time.
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report b-events-before [given-time]
-  ; Reports events list before given-time but on same day of given-time.
-  ; b-events is (list day (list (list time (list event-details)))), sorted ascending by day, ascending by time, reverse order inserted.
-  let cur-day int (given-time / (60  * 24))
-;  report filter [given-time > first ?] b-events-on cur-day ; Assume this is slower for days with lots of times (but is it?)
-
-  let found-pos b-events-found-position-of-time given-time
-  report sublist (b-events-on cur-day) 0 last found-pos
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report b-events-after [given-time]
-  ; Reports events list after given-time but on same day of given-time.
-  ; b-events is (list day (list (list time (list event-details)))), sorted ascending by day, ascending by time, reverse order inserted.
-  let cur-day int (given-time / (60  * 24))
-;  report filter [given-time < first ?] b-events-on cur-day ; Assume this is slower for days with lots of times (but is it?)
-
-  let found-pos b-events-found-position-of-time given-time
-  if first found-pos [
-    report sublist (b-events-on cur-day) (1 + last found-pos) length (b-events-on cur-day)
-  ]
-  report sublist (b-events-on cur-day) (last found-pos) length (b-events-on cur-day)
-end
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report b-events-get
-  ; Removes first event from b-events.
-  ; Reports that event, or [] if no events.
-  if empty? b-events [report []] ; No events yet.
-  let event-to-return (list
-    (first first last first b-events) ; Time of first time on first day.
-    (first last first last first b-events) ; Details of first event at first time on first day.
-    )
-
-  let cur-day first first b-events
-  let cur-time first first last first b-events
-  let cur-events but-first last first last first b-events
-  ifelse empty? but-first last first last first b-events [
-    let cur-times but-first last first b-events
-    ifelse empty? cur-times [ ; No other events on this day.
-      set b-events but-first b-events
+to-report events-make [given-structure]
+  ; Returns a new B-events list with the given structure.
+  ; B-Events list is a two-item list: [structure nested-lists]
+  foreach given-structure [x ->
+    if not is-number? x [
+      user-message (word "FATAL! Cannot create an events list with non-numeric structure: " given-structure)
+      report false
     ]
-    [ ; No more events at this time, but other times on this day.
-      set b-events fput (list cur-day but-first last first b-events) but-first b-events
+    if x <= 0 [
+      user-message (word "FATAL! This events list structure is not a list of positive numbers in descending order: " given-structure)
+      report false
     ]
+;    if x != int x [
+;      user-message (word "FATAL! This events list structure is not a list of positive integers in descending order: " given-structure)
+;      report false
+;    ]
   ]
-  [ ; More events at this time.
-    set b-events fput (list cur-day fput (list cur-time but-first last first last first b-events) but-first last first b-events) but-first b-events
+  if reverse given-structure != sort given-structure [
+      user-message (word "FATAL! This events list structure is not a list of positive numbers in descending order: " given-structure)
+    report false
   ]
-
-  report event-to-return
+;  if 1 != last given-structure [
+;    user-message (word "Warning! This events list structure does not end with 1: " given-structure)
+;    report false
+;  ]
+  report (list given-structure [])
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-to b-events-put [given-time given-event-details]
-  ; Insert given event in b-events in the correct place.
-  ; May already be events on same day.
-  ; May already be events at same time.
-  let cur-day int (given-time / (60  * 24))
-  let found-pos b-events-found-position-of-day cur-day
-  ifelse first found-pos [ ; Day was found at position.
-    set b-events sentence
-    (sublist b-events 0 last found-pos)
-    ; NB: lput for lifo, fput for fifo. fput much faster if many events have same time.
-    fput (list cur-day (sentence (b-events-before given-time) fput (list given-time (fput given-event-details b-events-at given-time)) (b-events-after given-time)))
-    (sublist b-events (1 + last found-pos) (length b-events))
-  ]
-  [ ; Day was not found, but should be inserted at position.
-    set b-events sentence
-    (sublist b-events 0 last found-pos)
-    ; NB: lput for lifo, fput for fifo. fput much faster if many events have same time.
-    fput (list cur-day (sentence (b-events-before given-time) fput (list given-time (fput given-event-details b-events-at given-time)) (b-events-after given-time)))
-    (sublist b-events (last found-pos) (length b-events))
-  ]
+to-report events-structure [given-bevents-list]
+  report first given-bevents-list
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-to-report b-events-test
-  ; Used for debugging.
-  report (list
-    (list 0 ; Day 0
-      (list ; List of times and events on that day.
-        (list 60 ; Time 60 minutes
-          (list ; List of events at that time.
-            (list "A" "a")
-            (list "B" "b")
-            )
-        )
-        (list 90 ; Time 90 minutea
-          (list ; List of events at that time.
-            (list "C" "c")
-            )
-        )
+to-report events-next-time [given-bevents-list]
+  ; Report [time event] for next event.
+  if empty? last given-bevents-list [report false]
+  if 1 = length first given-bevents-list [report first first last given-bevents-list]
+  report events-next-time (list (but-first first given-bevents-list) (last first last given-bevents-list))
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to-report events-next [given-bevents-list]
+  ; Report [time event] for next event.
+  if empty? last given-bevents-list [report []]
+;  if empty? first given-bevents-list [report first last given-bevents-list]
+  if 1 = length first given-bevents-list [report (list (first first last given-bevents-list) (first last first last given-bevents-list))]
+  report events-next (list (but-first first given-bevents-list) (last first last given-bevents-list))
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to-report events-one-of-next [given-bevents-list]
+  ; Report [time event] for randomly chosen event at next time.
+  if empty? last given-bevents-list [report []]
+;  if empty? first given-bevents-list [report one-of last given-bevents-list]
+  if 1 = length first given-bevents-list [report (list (first first last given-bevents-list) (one-of last first last given-bevents-list))]
+  report events-one-of-next (list (but-first first given-bevents-list) (last first last given-bevents-list))
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to-report events-insert [given-time given-bevents-list given-event]
+  ; Returns the bevents list with additional event inserted at correct time point.
+  let cur-pos 0
+  let num-before 0
+
+  ifelse empty? first given-bevents-list [
+    report (list
+      (first given-bevents-list)
+      events-inserted (first given-bevents-list) (last given-bevents-list) given-time given-event
       )
-    )
-
-    (list 1 ; Day 1
-      (list ; List of times and events on that day.
-        (list 1500 ; Time 1500 minutes
-          (list ; List of events at that time.
-            (list "D" "d")
-            )
-        )
-        (list 1530 ; Time 1500 minutes
-          (list ; List of events at that time.
-            (list "E" "e")
-            (list "F" "f")
-            (list "G" "g")
-            )
-        )
+  ]
+  [
+    report (list
+      (first given-bevents-list)
+      events-inserted (first given-bevents-list) (last given-bevents-list) given-time given-event
       )
-    )
+  ]
 
-  )
+  report given-bevents-list
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-to b-events-print
-  ; Prints the b-events in readable format.
-  ; Useful for debugging.
-  let cur-day 0
-  let cur-time 0
-  foreach b-events [day-times-pair ->
-    set cur-day first day-times-pair
-    foreach last day-times-pair [time-events-pair ->
-      set cur-time first time-events-pair
-      foreach last time-events-pair [cur-event ->
-        print (word "Day: " cur-day ", Time:" cur-time ", Details:" cur-event)
+to-report events-inserted [given-structure given-data given-time given-event]
+  ; Called by events-insert and by itself recursively.
+;  if empty? given-structure [report lput given-event given-data] ; FIFO. Slower, but more sensible?
+  if empty? given-structure [report lput given-event given-data] ; LIFO. Faster.
+  let level-time ifelse-value (empty? given-structure) [given-time] [given-time - given-time mod first given-structure]
+  if empty? given-data [
+    report (list (list level-time (events-inserted (but-first given-structure) (list ) given-time given-event)))
+  ]
+  let num-items-before length filter [x -> level-time > first x] given-data
+  report (sentence
+    (sublist given-data 0 num-items-before)
+    ifelse-value (num-items-before = length given-data) [
+      (list (list level-time events-inserted (but-first given-structure) (list ) given-time given-event))
+    ]
+    [
+      ifelse-value (level-time = first item num-items-before given-data) [
+        fput (list level-time events-inserted (but-first given-structure) (last item num-items-before given-data) given-time given-event)
+        (sublist given-data (1 + num-items-before) (length given-data))
+      ]
+      [
+        fput (list level-time events-inserted (but-first given-structure) (list ) given-time given-event)
+        (sublist given-data num-items-before (length given-data))
       ]
     ]
+    )
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to-report events-remove [given-time given-event given-bevents-list]
+  ; Returns the bevents list with all events matching the given one removed.
+  report (list (first given-bevents-list) (events-removed (first given-bevents-list) (last given-bevents-list) given-time given-event))
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to-report events-removed [given-structure given-data given-time given-event]
+  ; Called by events-remove and by itself recursively.
+  if empty? given-structure [report filter [x -> x != given-event] given-data]
+  let level-time ifelse-value (empty? given-structure) [given-time] [given-time - given-time mod first given-structure]
+  if empty? given-data [report []]
+;  let num-items-before length filter [x -> level-time > first x] given-data
+  let pos position level-time (map [x -> first x] given-data)
+  if pos = false [report given-data]
+  let alt events-removed (but-first given-structure) (last item pos given-data) given-time given-event
+  report (sentence
+    (sublist given-data 0 pos)
+    ifelse-value (empty? alt) [[]] [(list (list level-time alt))]
+    (sublist given-data (pos + 1) length given-data)
+    )
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to-report events-at-time [given-time given-bevents-list]
+  if empty? first given-bevents-list [report last given-bevents-list]
+  if empty? last given-bevents-list [report []]
+  let level-time given-time - given-time mod first first given-bevents-list
+  let pos position level-time (map [x -> first x] last given-bevents-list)
+  if pos = false [report []]
+  report events-at-time given-time (list
+    (but-first first given-bevents-list)
+    (last item pos last given-bevents-list)
+    )
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to-report events-simple-list [given-bevents]
+  ; Return the B-events data structure as a list of two-item lists [time event]
+  let ret []
+  if 1 = length first given-bevents [
+    foreach last given-bevents [x ->
+      set ret (sentence ret (map [y -> (list (first x) y)] last x))
+    ]
+    report ret
   ]
+
+  foreach last given-bevents [x ->
+    set ret (sentence ret (events-simple-list (list (but-first first given-bevents) last x)))
+  ]
+  report ret
+
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report b-events-found-position-of-day [given-day]
-  ; Reports (list day-found? position-to-insert-at)
-  (foreach b-events (n-values (length b-events) [? -> ?]) [[day-times-pair cur-pos] ->
-    if given-day = first day-times-pair [ report (list true cur-pos) ] ; Found it. Report position.
-    if given-day < first day-times-pair [ report (list false cur-pos) ] ; Missed it. Report how many come before.
-  ])
-  report (list false (length b-events))
-end
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-to-report b-events-found-position-of-time [given-time]
-  ; Reports (list time-found? position-to-insert-at)
-  ; Not currently used and not tested.
-  let cur-day int (given-time / (60  * 24))
-  (foreach (b-events-on cur-day) (n-values (length (b-events-on cur-day)) [? -> ?]) [[time-events-pair cur-pos] ->
-    if given-time = first time-events-pair [ report (list true cur-pos) ] ; Found it. Report position.
-    if given-time < first time-events-pair [ report (list false cur-pos) ] ; Missed it. Report how many come before.
-  ])
-  report (list false (length (b-events-on cur-day)))
-end
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2328,12 +2279,20 @@ to schedule [event-time given-agent given-task given-object given-reason]
     user-message-error (word "ERROR! Trying to schedule an event that should be past.\n Event-time=" event-time ", Agent=" given-agent ", Object=" given-object ", Reason=" given-reason)
   ]
 
-  b-events-put event-time (list given-agent given-task given-object given-reason sim-time)
+  ; events-insert time events-list event-details
+  set b-events events-insert event-time b-events (list given-agent given-task given-object given-reason sim-time)
 
   if print-scheduling? [
     ; Next line for debugging purposes:
     print (word ticks ": " sim-time ": Scheduled " given-agent " for time " event-time " to do " given-task " with " given-object " because of \"" given-reason "\"." " IR=" total-infection-rate ".")
   ]
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to-report b-events-structure
+  report [1440 240 60 1] ; Branch points at day, quarter-day, hour and minute.
+;  report [240 60 1] ; Branch points at quarter-day, hour and minute.
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3260,7 +3219,7 @@ BUTTON
 322
 303
 Go
-Go b-events-next-time
+Go events-next-time b-events
 T
 1
 T
@@ -3277,7 +3236,7 @@ BUTTON
 445
 303
 Go 1 Time Point
-go b-events-next-time
+go events-next-time b-events
 NIL
 1
 T
