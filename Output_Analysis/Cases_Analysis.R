@@ -14,14 +14,14 @@ library(tidyverse)
 library(ggplot2)
 
 # Set the working directory as required for your computer:
-setwd("~\\DiseaseDecisions\\Docking\\All_Interventions")
+setwd("~\\CovidModelAgentBasedReproduction\\Output_Analysis")
+#setwd("D:\\MyDocus\\Simulation\\NetLogo\\Diffusion\\DiseaseDecisions\\git\\CovidModelAgentBasedReproduction\\Output_Analysis")
 
 ########################################################################
 
-# Data file from LSHTM model:
-#D <- qread("1-dynamics_Uncorrected_Scilly.qs")
-#D <- qread("1-dynamics_Corrected_Scilly_200.qs")
-D <- qread("1-dynamics_Uncorrected_Rutland.qs")
+# Data file from LSHTM model (Target Model):
+# Decide which one you want to use.
+#D <- qread("1-dynamics_Uncorrected_Rutland.qs")
 D <- qread("1-dynamics_Corrected_Rutland.qs")
 
 # Restrict analysis to one region
@@ -33,14 +33,15 @@ D <- cbind(D, DN[, sum(value), by=list(scenario, run, t, region)])
 D <- D[,list(scenario,run,t,compartment,region,value,Pop_Size=V1)]
 
 # Add the R0 values for each run:
-R0s <- data.table(read.csv("R0s.csv"), key="X")
-R0s <- R0s[,list(run=X, R0=x),key=X]
+R0s <- data.table(read.csv("Runs_R0_SeedStart_Peakt.csv"), key="R0")
+R0s <- R0s[,list(R0=R0),key=run]
 setkey(D, run)
 D <- R0s[D] # Left outer join
+head(D)  # Check we still have data
 
 ########################################################################
 
-# Read in the data from DiseaseDecisions:
+# Read in the data from DiseaseDecisions.nlogo (Reproduction Model):
 X <- qread("X.qs") # X comes from the Table csv files output by DiseaseDecisions.nlogo
 
 # Check what you have loaded/created:
@@ -75,7 +76,6 @@ plot_peak_cases <- function(scen="Base", iv_delay=0, ylim=c(0,5)) {
 	DC <- D[scenario==scen & compartment=="cases" & region=="England", max(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
 	DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
 	XC <- X[Intervention==scenarios[scenario==scen,intervention] & Intervention.Shift==iv_delay,list(count.people, R0=round(R0,5), ABM_Value=100 * max.new.cases / count.people), keyby=max.new.cases]
-#	Z <- XC[,list(Mean_Output=mean(ABM_Value), p0.025=quantile(ABM_Value, 0.025), p0.05=quantile(ABM_Value, 0.05), p0.10=quantile(ABM_Value, 0.10), p0.25=quantile(ABM_Value, 0.25), p0.50=quantile(ABM_Value, 0.50), p0.75=quantile(ABM_Value, 0.75), p0.90=quantile(ABM_Value, 0.90), p0.95=quantile(ABM_Value, 0.95), p0.05=quantile(ABM_Value, 0.975)), by=R0]
 	plot_comparison(XC, DC, ylim, ylab="Peak Cases as % of Population")
 }
 
@@ -84,7 +84,6 @@ plot_total_cases <- function(scen="Base", iv_delay=0, ylim=c(0,5)) {
 	DC <- D[scenario==scen & compartment=="cases" & region=="England", sum(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
 	DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
 	XC <- X[Intervention==scenarios[scenario==scen,intervention] & Intervention.Shift==iv_delay,list(count.people, R0=round(R0,5), ABM_Value=100 * total.cases / count.people), keyby=max.new.cases]
-#	Z <- XC[,list(Mean_Output=mean(ABM_Value), p0.025=quantile(ABM_Value, 0.025), p0.05=quantile(ABM_Value, 0.05), p0.10=quantile(ABM_Value, 0.10), p0.25=quantile(ABM_Value, 0.25), p0.50=quantile(ABM_Value, 0.50), p0.75=quantile(ABM_Value, 0.75), p0.90=quantile(ABM_Value, 0.90), p0.95=quantile(ABM_Value, 0.95), p0.05=quantile(ABM_Value, 0.975)), by=R0]
 	plot_comparison(XC, DC, ylim, ylab="Total Cases as % of Population")
 }
 
@@ -93,7 +92,6 @@ plot_final_S <- function(scen="Base", iv_delay=0, ylim=c(0,5)) {
 	DC <- D[scenario==scen & compartment=="S" & region=="England", min(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
 	DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
 	XC <- X[Intervention==scenarios[scenario==scen,intervention] & Intervention.Shift==iv_delay,list(count.people, R0=round(R0,5), ABM_Value=100 * X.ds.cur.num..of.susceptible / count.people), keyby=max.new.cases]
-#	Z <- XC[,list(Mean_Output=mean(ABM_Value), p0.025=quantile(ABM_Value, 0.025), p0.05=quantile(ABM_Value, 0.05), p0.10=quantile(ABM_Value, 0.10), p0.25=quantile(ABM_Value, 0.25), p0.50=quantile(ABM_Value, 0.50), p0.75=quantile(ABM_Value, 0.75), p0.90=quantile(ABM_Value, 0.90), p0.95=quantile(ABM_Value, 0.95), p0.05=quantile(ABM_Value, 0.975)), by=R0]
 	plot_comparison(XC, DC, ylim, ylab="Final Susceptibles as % of Population")
 }
 
@@ -102,7 +100,6 @@ plot_total_deaths <- function(scen="Base", iv_delay=0, ylim=c(0,5)) {
 	DC <- D[scenario==scen & compartment=="death_o" & region=="England", sum(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
 	DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
 	XC <- X[Intervention==scenarios[scenario==scen,intervention] & Intervention.Shift==iv_delay,list(count.people, R0=round(R0,5), ABM_Value=100 * total.deaths / count.people), keyby=max.new.cases]
-#	Z <- XC[,list(Mean_Output=mean(ABM_Value), p0.025=quantile(ABM_Value, 0.025), p0.05=quantile(ABM_Value, 0.05), p0.10=quantile(ABM_Value, 0.10), p0.25=quantile(ABM_Value, 0.25), p0.50=quantile(ABM_Value, 0.50), p0.75=quantile(ABM_Value, 0.75), p0.90=quantile(ABM_Value, 0.90), p0.95=quantile(ABM_Value, 0.95), p0.05=quantile(ABM_Value, 0.975)), by=R0]
 	plot_comparison(XC, DC, ylim, ylab="Total Deaths as % of Population")
 }
 
@@ -113,7 +110,6 @@ plot_peak_icu <- function(scen="Base", iv_delay=0, ylim=c(0,5)) {
 	DC <- D[scenario==scen & compartment=="icu_p" & region=="England", max(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
 	DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
 	XC <- X[Intervention==scenarios[scenario==scen,intervention] & Intervention.Shift==iv_delay,list(count.people, R0=round(R0,5), ABM_Value=100 * num.peak.icu.beds / count.people), keyby=max.new.cases]
-#	Z <- XC[,list(Mean_Output=mean(ABM_Value), p0.025=quantile(ABM_Value, 0.025), p0.05=quantile(ABM_Value, 0.05), p0.10=quantile(ABM_Value, 0.10), p0.25=quantile(ABM_Value, 0.25), p0.50=quantile(ABM_Value, 0.50), p0.75=quantile(ABM_Value, 0.75), p0.90=quantile(ABM_Value, 0.90), p0.95=quantile(ABM_Value, 0.95), p0.05=quantile(ABM_Value, 0.975)), by=R0]
 	plot_comparison(XC, DC, ylim, ylab="Peak ICU Beds as % of Population")
 }
 
@@ -122,7 +118,6 @@ plot_peak_nonicu <- function(scen="Base", iv_delay=0, ylim=c(0,5)) {
 	DC <- D[scenario==scen & compartment=="nonicu_p" & region=="England", max(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
 	DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
 	XC <- X[Intervention==scenarios[scenario==scen,intervention] & Intervention.Shift==iv_delay,list(count.people, R0=round(R0,5), ABM_Value=100 * num.peak.non.icu.beds / count.people), keyby=max.new.cases]
-#	Z <- XC[,list(Mean_Output=mean(ABM_Value), p0.025=quantile(ABM_Value, 0.025), p0.05=quantile(ABM_Value, 0.05), p0.10=quantile(ABM_Value, 0.10), p0.25=quantile(ABM_Value, 0.25), p0.50=quantile(ABM_Value, 0.50), p0.75=quantile(ABM_Value, 0.75), p0.90=quantile(ABM_Value, 0.90), p0.95=quantile(ABM_Value, 0.95), p0.05=quantile(ABM_Value, 0.975)), by=R0]
 	plot_comparison(XC, DC, ylim, ylab="Peak Non-ICU Beds as % of Population")
 }
 
@@ -131,7 +126,6 @@ plot_peak_t_cases <- function(scen="Base", iv_delay=0, ylim=c(0,20)) {
 	DC <- D[compartment == "cases" & scenario==scen & region=="England", .(total_cases = sum(value)), by = .(t, run, R0)][,t[which.max(total_cases)],by=.(run,R0)];
 	DC <- DC[,list(run, R0=round(R0,5), Value=V1/7)]
 	XC <- X[Intervention==scenarios[scenario==scen,intervention] & Intervention.Shift==iv_delay,list(count.people, R0=round(R0,5), ABM_Value=num.weeks.to.peak.week.cases), keyby=max.new.cases]
-#	Z <- XC[,list(Mean_Output=mean(ABM_Value), p0.025=quantile(ABM_Value, 0.025), p0.05=quantile(ABM_Value, 0.05), p0.10=quantile(ABM_Value, 0.10), p0.25=quantile(ABM_Value, 0.25), p0.50=quantile(ABM_Value, 0.50), p0.75=quantile(ABM_Value, 0.75), p0.90=quantile(ABM_Value, 0.90), p0.95=quantile(ABM_Value, 0.95), p0.975=quantile(ABM_Value, 0.975)), by=R0]
 	plot_comparison(XC, DC, ylim, ylab="Weeks to Peak in Cases")
 }
 
@@ -154,7 +148,6 @@ plot_comparison <- function(XC, DC, ylim=c(0,100), ylab="Output as % of Populati
 	ggplot(Z) +
 	theme_light(base_size = 14) +
 	theme(plot.title = element_text(size=14), axis.title.x = element_text(size=14), axis.title.y = element_text(size=14)) +
-#	labs(x=expression(R[0]), y=ylab, title="Target (blue dots)\nReproduction (median at +\n with Min, Max, and 2.5/25/75/97.5 percentiles shaded)") +
 	labs(x=expression(R[0]), y=ylab) +
 	ylim(ylim) +
 	geom_point(aes(x=DC[,R0], y=DC[,Value]), shape=16, colour="blue") +
@@ -194,7 +187,6 @@ plot_peak_t_cases(scen="Combination", iv_delay=0, ylim=c(0,60))
 # Other scenarios:
 
 plot_peak_cases(scen="Social Distancing", iv_delay=0, ylim=c(0,5))
-#plot_peak_cases(scen="Combination", iv_delay=14, ylim=c(0,5)) # Might not have run for intervention delays
 
 plot_total_cases(scen="School Closures", iv_delay=0, ylim=c(0,100))
 plot_total_cases(scen="Social Distancing", iv_delay=0, ylim=c(0,100))
@@ -297,3 +289,60 @@ plot_reps_peak_cases(2.65, 2.70, "Combination")
 plot_reps_peak_cases(3.0, 3.05, "Combination")
 plot_reps_peak_cases(3.2, 3.25, "Combination")
 
+########################################################################
+########################################################################
+
+# TM points outside the RM prediction interval
+
+points_outside_interval <- function(XC, DC, lp = 0.025, up = 0.975) {
+	Z <- XC[, list(lq=quantile(ABM_Value, lp), uq=quantile(ABM_Value, up)), by=R0]
+	ZD <- merge(Z, DC)
+	n <- sum(ZD[, ((Value<lq) | (Value>uq)) ])
+	return(n)
+}
+
+# Time to peak cases: Base
+DC <- D[scenario=="Base" & compartment=="cases" & region=="England", .(total_cases = sum(value)), by = .(t, run, R0)][,t[which.max(total_cases)],by=.(run,R0)];
+DC <- DC[,list(run, R0=round(R0,5), Value=V1/7)]
+XC <- X[Intervention==scenarios[scenario=="Base",intervention] & Intervention.Shift==0,list(count.people, R0=round(R0,5), ABM_Value=num.weeks.to.peak.week.cases), keyby=max.new.cases]
+
+# Time to peak cases: Combination
+DC <- D[scenario=="Combination" & compartment=="cases" & region=="England", .(total_cases = sum(value)), by = .(t, run, R0)][,t[which.max(total_cases)],by=.(run,R0)];
+DC <- DC[,list(run, R0=round(R0,5), Value=V1/7)]
+XC <- X[Intervention==scenarios[scenario=="Combination",intervention] & Intervention.Shift==0,list(count.people, R0=round(R0,5), ABM_Value=num.weeks.to.peak.week.cases), keyby=max.new.cases]
+
+# Total cases: Base
+DC <- D[scenario=="Base" & compartment=="cases" & region=="England", sum(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
+DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
+XC <- X[Intervention==scenarios[scenario=="Base",intervention] & Intervention.Shift==0,list(count.people, R0=round(R0,5), ABM_Value=100 * total.cases / count.people), keyby=max.new.cases]
+
+# Peak cases: Base
+DC <- D[scenario=="Base" & compartment=="cases" & region=="England", max(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
+DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
+XC <- X[Intervention==scenarios[scenario=="Base",intervention] & Intervention.Shift==0,list(count.people, R0=round(R0,5), ABM_Value=100 * max.new.cases / count.people), keyby=max.new.cases]
+
+# Peak cases: Combination
+DC <- D[scenario=="Combination" & compartment=="cases" & region=="England", max(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
+DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
+XC <- X[Intervention==scenarios[scenario=="Combination",intervention] & Intervention.Shift==0,list(count.people, R0=round(R0,5), ABM_Value=100 * max.new.cases / count.people), keyby=max.new.cases]
+
+points_outside_interval(XC, DC, lp=0.025, up=0.975)
+points_outside_interval(XC, DC, lp=0.05, up=0.95)
+points_outside_interval(XC, DC, lp=0.25, up=0.75)
+
+# Likelihood of getting this many points outside a 95% interval
+n <- points_outside_interval(XC, DC, lp=0.025, up=0.975)
+dbinom(n, size=50, prob=0.05) # Prob(Get n points outside interval)
+1 - pbinom(n-1, size=50, prob=0.05) # Prob(Get >n-1 points outside interval)
+
+# A reminder of what the Binomial Distribution looks like
+plot(0:50, dbinom(0:50, size=50, prob=0.05),type='h', xlab="Successes", ylab="Probability", main="Binomial Distribution (n=50, p=0.05)", lwd=3)
+
+# NB: Our prediction intervals (percentiles) are only estimates.
+# The true percentiles from the population of RM runs may be different.
+# We could "acquire" a sampling distribution for each R0 value's percentiles
+# using bootstrap resampling.
+
+
+########################################################################
+########################################################################
