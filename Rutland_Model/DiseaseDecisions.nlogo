@@ -5960,12 +5960,12 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.2.0
+NetLogo 6.2.2
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
 <experiments>
-  <experiment name="experiment-LSHTM-Docking-50-R0s" repetitions="5" sequentialRunOrder="false" runMetricsEveryStep="false">
+  <experiment name="experiment-LSHTM-Docking-50-R0s" repetitions="50" sequentialRunOrder="false" runMetricsEveryStep="false">
     <setup>setup-LSHTM-R0-and-Intervention
 setup</setup>
     <go>go-1-day</go>
