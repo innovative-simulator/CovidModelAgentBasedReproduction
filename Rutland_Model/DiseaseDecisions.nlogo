@@ -5965,7 +5965,7 @@ NetLogo 6.2.2
 @#$#@#$#@
 @#$#@#$#@
 <experiments>
-  <experiment name="experiment-LSHTM-Docking-50-R0s" repetitions="50" sequentialRunOrder="false" runMetricsEveryStep="false">
+  <experiment name="experiment-LSHTM-Docking-50-R0s" repetitions="100" sequentialRunOrder="false" runMetricsEveryStep="false">
     <setup>setup-LSHTM-R0-and-Intervention
 setup</setup>
     <go>go-1-day</go>
