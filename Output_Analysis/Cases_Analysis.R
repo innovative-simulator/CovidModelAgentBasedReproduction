@@ -15,7 +15,7 @@ library(ggplot2)
 
 # Set the working directory as required for your computer:
 setwd("~\\CovidModelAgentBasedReproduction\\Output_Analysis")
-#setwd("D:\\MyDocus\\Simulation\\NetLogo\\Diffusion\\DiseaseDecisions\\git\\CovidModelAgentBasedReproduction\\Output_Analysis")
+setwd("D:\\Share\\git\\CovidModelAgentBasedReproduction\\Output_Analysis")
 
 ########################################################################
 
@@ -315,6 +315,11 @@ XC <- X[Intervention==scenarios[scenario=="Combination",intervention] & Interven
 DC <- D[scenario=="Base" & compartment=="cases" & region=="England", sum(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
 DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
 XC <- X[Intervention==scenarios[scenario=="Base",intervention] & Intervention.Shift==0,list(count.people, R0=round(R0,5), ABM_Value=100 * total.cases / count.people), keyby=max.new.cases]
+
+# Total cases: Combination
+DC <- D[scenario=="Combination" & compartment=="cases" & region=="England", sum(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
+DC <- DC[,list(run, R0=round(R0,5), Value=100 * V1 / Pop_Size)]
+XC <- X[Intervention==scenarios[scenario=="Combination",intervention] & Intervention.Shift==0,list(count.people, R0=round(R0,5), ABM_Value=100 * total.cases / count.people), keyby=max.new.cases]
 
 # Peak cases: Base
 DC <- D[scenario=="Base" & compartment=="cases" & region=="England", max(value),by=list(scenario, compartment, region, run, R0, Pop_Size)]
