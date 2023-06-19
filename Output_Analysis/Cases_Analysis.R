@@ -1,9 +1,16 @@
 ########################################################################
 ########################################################################
-## Load datasets from LSHTM model and DiseaseDecisions.nlogo experiment 
-## Do plots for Paper R, comparing programs by R0
-## (Also code for investigating how many repetitions (in NetLogo)
-## should be run for each R0 value.
+## Load datasets from LSHTM model (Target Model TM, datatable D) 
+## and DiseaseDecisions.nlogo (Reproduction Model RM, datatable X). 
+##
+## Do plots for Paper R, comparing programs by R0.
+## NB: Fig6 uses different "uncorrected" TM file, and so recomputes D.
+##
+## (Also code for investigating how many repetitions in NetLogo
+## should be run for each R0 value.)
+##
+## (Also code for counting TM points outside RM percentile ribbons.)
+##
 ########################################################################
 ########################################################################
 
@@ -13,63 +20,88 @@ library(qs)
 library(tidyverse)
 library(ggplot2)
 
+########################################################################
+########################################################################
 # Set the working directory as required for your computer:
+########################################################################
+########################################################################
+
 setwd("~\\CovidModelAgentBasedReproduction\\Output_Analysis")
 #setwd("D:\\MyDocus\\Simulation\\NetLogo\\Diffusion\\DiseaseDecisions\\git\\CovidModelAgentBasedReproduction\\Output_Analysis")
 
 ########################################################################
+########################################################################
+# Load the R0 values for each run:
+# (Previously dumped to file by editted version of TM script.)
+########################################################################
+########################################################################
 
-# Data file from LSHTM model (Target Model):
-# Decide which one you want to use.
-#D <- qread("1-dynamics_Uncorrected_Rutland.qs")
-D <- qread("1-dynamics_Corrected_Rutland.qs")
-
-# Restrict analysis to one region
-D <- D[run <= 200 & region=="England"]
-
-# Add population size and rename field
-DN <- D[compartment %in% list("S", "E", "Ip", "Is", "Ia", "R")]
-D <- cbind(D, DN[, sum(value), by=list(scenario, run, t, region)])
-D <- D[,list(scenario,run,t,compartment,region,value,Pop_Size=V1)]
-
-# Add the R0 values for each run:
 R0s <- data.table(read.csv("Runs_R0_SeedStart_Peakt.csv"), key="R0")
 R0s <- R0s[,list(R0=R0),key=run]
+
+########################################################################
+########################################################################
+# Load data file from LSHTM model (Target Model):
+########################################################################
+########################################################################
+
+D_loaded_and_labelled <- function(filename="1-dynamics_Corrected_Rutland.qs") {
+	# Data file from LSHTM model (Target Model):
+	D <- qread(filename)
+
+	# Restrict analysis to one region
+	D <- D[run <= 200 & region=="England"]
+
+	# Add population size and rename field
+	DN <- D[compartment %in% list("S", "E", "Ip", "Is", "Ia", "R")]
+	D <- cbind(D, DN[, sum(value), by=list(scenario, run, t, region)])
+	D <- D[,list(scenario,run,t,compartment,region,value,Pop_Size=V1)]
+	
+	return(D)
+}
+
+# Decide which one you want to use.
+#D <- D_loaded_and_labelled("1-dynamics_Uncorrected_Rutland.qs")
+D <- D_loaded_and_labelled("1-dynamics_Corrected_Rutland.qs")
+dim(D)
+
 setkey(D, run)
 D <- R0s[D] # Left outer join
 head(D)  # Check we still have data
 
 ########################################################################
+########################################################################
+# Read in the data from DiseaseDecisions.nlogo (Reproduction Model RM):
+########################################################################
+########################################################################
 
-# Read in the data from DiseaseDecisions.nlogo (Reproduction Model):
 X <- qread("X.qs") # X comes from the Table csv files output by DiseaseDecisions.nlogo
+dim(X)
+setkey(X, R0)
 
-# Check what you have loaded/created:
-#head(D)
-#unique(D[,compartment])
-#unique(D[,R0])
-#head(X)
-#colnames(X)
-#length(unique(X[,R0]))
-
+########################################################################
 # Use only the R0s that are in X:
+
 Selected_R0s <- data.table(unique(X[,R0]))
+dim(Selected_R0s)
+
 setkey(D, R0)
 dim(D)
 D <- D[Selected_R0s]
 dim(D)
+
+########################################################################
 
 # Mapping scenario field in D to that in X
 # (Unnecessary now - the two programs have now been synched.)
 scenarios <- data.table(scenario=unique(D[,scenario]), intervention=unique(D[,scenario]))		
 scenarios
 
-setkey(D, R0)
-setkey(X, R0)
-
 ########################################################################
-
+########################################################################
 # Construct comparable data sets and plot them
+########################################################################
+########################################################################
 
 # Peak Cases
 plot_peak_cases <- function(scen="Base", iv_delay=0, ylim=c(0,5)) {
@@ -146,8 +178,8 @@ plot_comparison <- function(XC, DC, ylim=c(0,100), ylab="Output as % of Populati
 plot_comparison <- function(XC, DC, ylim=c(0,100), ylab="Output as % of Population") {
 	Z <- XC[,list(Mean_Output=mean(ABM_Value), Min_Output=min(ABM_Value), Max_Output=max(ABM_Value), p0.025=quantile(ABM_Value, 0.025), p0.05=quantile(ABM_Value, 0.05), p0.10=quantile(ABM_Value, 0.10), p0.25=quantile(ABM_Value, 0.25), p0.50=quantile(ABM_Value, 0.50), p0.75=quantile(ABM_Value, 0.75), p0.90=quantile(ABM_Value, 0.90), p0.95=quantile(ABM_Value, 0.95), p0.975=quantile(ABM_Value, 0.975)), by=R0]
 	ggplot(Z) +
-	theme_light(base_size = 14) +
-	theme(plot.title = element_text(size=14), axis.title.x = element_text(size=14), axis.title.y = element_text(size=14)) +
+	theme_light(base_size = 11) +
+	theme(plot.title = element_text(size=11), axis.title.x = element_text(size=11), axis.title.y = element_text(size=11)) +
 	labs(x=expression(R[0]), y=ylab) +
 	ylim(ylim) +
 	geom_point(aes(x=DC[,R0], y=DC[,Value]), shape=16, colour="blue") +
@@ -160,29 +192,76 @@ plot_comparison <- function(XC, DC, ylim=c(0,100), ylab="Output as % of Populati
 }
 
 ########################################################################
-
+########################################################################
 # Plots for Paper R:
+########################################################################
+########################################################################
 
+# Parameters for saving all plots.
+wid <- 3 # width of chart (inches)
+hgt <- 3 # height of chart (inches)
+uts <- c("in") # units (inches)
+dpi <- 300
+
+# Fig 3
 plot_peak_cases(scen="Base", iv_delay=0, ylim=c(0,4))
+ggsave("Fig3_Left.png", width=wid, height=hgt, units=uts, dpi=dpi)
 plot_peak_cases(scen="School Closures", iv_delay=0, ylim=c(0,4))
 plot_peak_cases(scen="Combination", iv_delay=0, ylim=c(0,4))
+ggsave("Fig3_Right.png", width=wid, height=hgt, units=uts, dpi=dpi)
 
+# Not in paper
 plot_total_cases(scen="Base", iv_delay=0, ylim=c(0,100))
 plot_total_cases(scen="Combination", iv_delay=0, ylim=c(0,100))
 
+# Fig 4
 plot_total_deaths(scen="Base", iv_delay=0, ylim=c(0,1.25))
+ggsave("Fig4_Left.png", width=wid, height=hgt, units=uts, dpi=dpi)
 plot_total_deaths(scen="Combination", iv_delay=0, ylim=c(0,1.25))
+ggsave("Fig4_Right.png", width=wid, height=hgt, units=uts, dpi=dpi)
 
+# Not in paper
 plot_peak_icu(scen="Base", iv_delay=0, ylim=c(0,2))
 plot_peak_icu(scen="Combination", iv_delay=0, ylim=c(0,2))
 
+# Fig 5
 plot_peak_t_cases(scen="Base", iv_delay=0, ylim=c(0,60))
+ggsave("Fig5_Left.png", width=wid, height=hgt, units=uts, dpi=dpi)
 plot_peak_t_cases(scen="Combination", iv_delay=0, ylim=c(0,60))
+ggsave("Fig5_Right.png", width=wid, height=hgt, units=uts, dpi=dpi)
 
 ########################################################################
 ########################################################################
+# Re-do D using the uncorrected datasets
+########################################################################
+########################################################################
 
+D <- D_loaded_and_labelled("1-dynamics_Uncorrected_Rutland.qs")
+dim(D)
+
+# Add the R0 values for each run:
+setkey(D, run)
+D <- R0s[D] # Left outer join
+head(D)  # Check we still have data
+
+# Use only the R0s that are in X:
+setkey(D, R0)
+D <- D[Selected_R0s]
+dim(D)
+
+########################################################################
+# Fig 6
+plot_peak_cases(scen="Combination", iv_delay=0, ylim=c(0,4))
+ggsave("Fig6_Left.png", width=wid, height=hgt, units=uts, dpi=dpi)
+plot_total_cases(scen="Combination", iv_delay=0, ylim=c(0,100))
+ggsave("Fig6_Right.png", width=wid, height=hgt, units=uts, dpi=dpi)
+
+
+########################################################################
+########################################################################
 # Alternative plots, not in paper R
+########################################################################
+########################################################################
 
 # Other scenarios:
 
@@ -203,8 +282,9 @@ plot_peak_nonicu(scen="Base", iv_delay=0, ylim=c(0,5))
 
 ########################################################################
 ########################################################################
-
 # Repetitions chart
+########################################################################
+########################################################################
 
 colnames(X)
 
@@ -291,8 +371,9 @@ plot_reps_peak_cases(3.2, 3.25, "Combination")
 
 ########################################################################
 ########################################################################
-
 # TM points outside the RM prediction interval
+########################################################################
+########################################################################
 
 points_outside_interval <- function(XC, DC, lp = 0.025, up = 0.975) {
 	Z <- XC[, list(lq=quantile(ABM_Value, lp), uq=quantile(ABM_Value, up)), by=R0]
@@ -332,11 +413,16 @@ points_outside_interval(XC, DC, lp=0.25, up=0.75)
 
 # Likelihood of getting this many points outside a 95% interval
 n <- points_outside_interval(XC, DC, lp=0.025, up=0.975)
-dbinom(n, size=50, prob=0.05) # Prob(Get n points outside interval)
+#dbinom(n, size=50, prob=0.05) # Prob(Get n points outside interval)
 1 - pbinom(n-1, size=50, prob=0.05) # Prob(Get >n-1 points outside interval)
+
+# Likelihood of getting this many points outside a 50% interval
+n <- points_outside_interval(XC, DC, lp=0.25, up=0.75)
+1 - pbinom(n-1, size=50, prob=0.5) # Prob(Get >n-1 points outside interval)
 
 # A reminder of what the Binomial Distribution looks like
 plot(0:50, dbinom(0:50, size=50, prob=0.05),type='h', xlab="Successes", ylab="Probability", main="Binomial Distribution (n=50, p=0.05)", lwd=3)
+plot(0:50, dbinom(0:50, size=50, prob=0.5),type='h', xlab="Successes", ylab="Probability", main="Binomial Distribution (n=50, p=0.5)", lwd=3)
 
 # NB: Our prediction intervals (percentiles) are only estimates.
 # The true percentiles from the population of RM runs may be different.
