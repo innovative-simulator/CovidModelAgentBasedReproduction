@@ -75,6 +75,13 @@ head(D)  # Check we still have data
 ########################################################################
 ########################################################################
 
+# Convert BehaviorSpace output, and add a field to identify the source later.
+#X <- cbind(as.data.table(read.csv("MyPC-experiment-LSHTM-Docking-50-R0s-Rutland.csv", header=TRUE, sep=",", skip=6)), source="L800_230601")
+
+# .qs file will be much faster to load than .csv, and more compact.
+#qsave(X, "X.qs")
+
+# Here's one I prepared earlier
 X <- qread("X.qs") # X comes from the Table csv files output by DiseaseDecisions.nlogo
 dim(X)
 setkey(X, R0)
